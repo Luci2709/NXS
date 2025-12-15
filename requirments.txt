@@ -2,6 +2,7 @@ streamlit
 pandas
 plotly
 requests
-streamlit-drawable-canvas
-Pillow
 numpy
+Pillow
+streamlit-drawable-canvas
+watchdog
