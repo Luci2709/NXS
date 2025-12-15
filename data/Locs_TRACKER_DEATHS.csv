@@ -1,0 +1,140 @@
+Round,Killer,Victim,Weapon,Victim_X,Victim_Y
+1,Noctis#7705,VRX ProfPanda#Vyrox,Ghost,3128,237
+1,Umbra#0202,VRX Kawii#ECHO,Ghost,535,2361
+1,Trashies#6767,VRX Saizsu#SRG,Ghost,3924,2652
+1,Luggi#IGL,Fruchtig#FOKUS,Classic,2526,-502
+1,Luggi#IGL,SirBrainz#3745,Classic,1343,2673
+1,VRX ProfPanda#Vyrox,Gengar#0960,Ghost,3353,1753
+1,VRX ProfPanda#Vyrox,Trashies#6767,Ghost,3191,1552
+1,SirBrainz#3745,Umbra#0202,Ghost,-140,3851
+2,Noctis#7705,Fruchtig#FOKUS,Bulldog,966,-3996
+2,Noctis#7705,VRX ProfPanda#Vyrox,Bulldog,3075,-3555
+2,VRX Saizsu#SRG,Umbra#0202,Classic,2641,-4531
+2,Umbra#0202,VRX Kawii#ECHO,Spectre,739,2547
+2,Umbra#0202,SirBrainz#3745,Spectre,2671,-4621
+2,Gengar#0960,VRX Saizsu#SRG,Headhunter,2641,-3557
+3,VRX Saizsu#SRG,Noctis#7705,Vandal,2588,3934
+3,Fruchtig#FOKUS,Gengar#0960,Vandal,554,3359
+3,Fruchtig#FOKUS,Trashies#6767,Vandal,832,5744
+3,Trashies#6767,VRX Kawii#ECHO,Guardian,2373,3442
+3,Trashies#6767,SirBrainz#3745,Guardian,4556,3342
+3,Luggi#IGL,Fruchtig#FOKUS,Bulldog,249,5063
+3,VRX ProfPanda#Vyrox,Luggi#IGL,Vandal,906,5423
+3,SirBrainz#3745,Umbra#0202,Vandal,3964,4156
+4,Trashies#6767,SirBrainz#3745,Vandal,1011,-1134
+4,Trashies#6767,VRX Saizsu#SRG,Vandal,2772,532
+4,Luggi#IGL,VRX ProfPanda#Vyrox,Phantom,739,-869
+4,SirBrainz#3745,Umbra#0202,Guardian,-1753,105
+4,Gengar#0960,VRX Kawii#ECHO,Vandal,-151,3425
+5,Umbra#0202,VRX ProfPanda#Vyrox,Vandal,688,-762
+5,Umbra#0202,SirBrainz#3745,Overdrive,3778,-1292
+5,Fruchtig#FOKUS,Umbra#0202,Vandal,3291,-1806
+5,Fruchtig#FOKUS,Noctis#7705,Vandal,77,-3004
+5,Trashies#6767,VRX Saizsu#SRG,Vandal,4098,-1957
+5,Luggi#IGL,Fruchtig#FOKUS,Phantom,165,-3343
+5,VRX Kawii#ECHO,Trashies#6767,Spectre,3566,-1353
+5,VRX Kawii#ECHO,Luggi#IGL,Vandal,595,-4568
+5,Gengar#0960,VRX Kawii#ECHO,Classic,693,-4633
+5,Gengar#0960,Gengar#0960,Bomb,-1864,-5578
+6,Trashies#6767,VRX Kawii#ECHO,Vandal,2839,3662
+6,SirBrainz#3745,Trashies#6767,Vandal,2343,5235
+6,SirBrainz#3745,Noctis#7705,Vandal,2770,2429
+6,Gengar#0960,Fruchtig#FOKUS,Vandal,3167,2153
+6,Gengar#0960,VRX ProfPanda#Vyrox,Vandal,-649,3967
+7,Noctis#7705,VRX Saizsu#SRG,Vandal,-1317,980
+7,Noctis#7705,VRX ProfPanda#Vyrox,Vandal,2803,-565
+7,Noctis#7705,VRX Kawii#ECHO,Vandal,2557,3442
+7,Umbra#0202,Fruchtig#FOKUS,Phantom,-1207,-3018
+7,Fruchtig#FOKUS,Luggi#IGL,Stinger,-2400,-2409
+7,Gengar#0960,SirBrainz#3745,Tour De Force,2364,-51
+8,Umbra#0202,VRX Kawii#ECHO,Phantom,-2850,2957
+8,Umbra#0202,SirBrainz#3745,Phantom,1585,2770
+8,Trashies#6767,VRX Saizsu#SRG,Vandal,3158,389
+8,Luggi#IGL,Fruchtig#FOKUS,Phantom,1757,-4948
+8,VRX ProfPanda#Vyrox,Noctis#7705,Vandal,751,-4364
+8,Gengar#0960,VRX ProfPanda#Vyrox,Vandal,27,-4039
+9,Noctis#7705,SirBrainz#3745,Vandal,-1883,-1767
+9,Noctis#7705,VRX Kawii#ECHO,Vandal,-1422,-1745
+9,VRX Saizsu#SRG,Trashies#6767,Judge,-1185,-5507
+9,VRX Saizsu#SRG,Noctis#7705,Vandal,-1307,-3679
+9,Umbra#0202,Fruchtig#FOKUS,Phantom,-1423,-4153
+9,Umbra#0202,VRX ProfPanda#Vyrox,Phantom,-1233,-3192
+9,VRX Kawii#ECHO,Gengar#0960,Phantom,-1757,787
+10,Fruchtig#FOKUS,Noctis#7705,Vandal,445,-4453
+10,Fruchtig#FOKUS,Umbra#0202,Vandal,2124,-5650
+10,Fruchtig#FOKUS,Luggi#IGL,Vandal,1743,-5405
+10,Fruchtig#FOKUS,Trashies#6767,Vandal,-1603,-4314
+10,Trashies#6767,VRX Kawii#ECHO,Vandal,-1177,-2316
+10,Luggi#IGL,VRX ProfPanda#Vyrox,Phantom,-1088,-2713
+10,VRX Kawii#ECHO,Gengar#0960,Ares,-1579,-1955
+10,Gengar#0960,SirBrainz#3745,Vandal,903,353
+11,Luggi#IGL,SirBrainz#3745,Phantom,1680,-352
+11,Luggi#IGL,Fruchtig#FOKUS,Phantom,955,-187
+11,Luggi#IGL,VRX Kawii#ECHO,Phantom,-1176,2611
+11,Luggi#IGL,VRX Saizsu#SRG,Phantom,-880,2951
+11,Luggi#IGL,VRX ProfPanda#Vyrox,Phantom,2371,3584
+11,VRX ProfPanda#Vyrox,Gengar#0960,Vandal,-1694,-319
+11,VRX ProfPanda#Vyrox,Noctis#7705,Vandal,1171,2631
+11,SirBrainz#3745,Trashies#6767,Phantom,492,1088
+11,VRX Kawii#ECHO,Umbra#0202,Phantom,-268,685
+12,Noctis#7705,VRX Saizsu#SRG,Vandal,3158,370
+12,Umbra#0202,VRX ProfPanda#Vyrox,Phantom,-1250,-610
+12,Umbra#0202,Fruchtig#FOKUS,Phantom,2023,-4716
+12,Umbra#0202,SirBrainz#3745,Phantom,-38,-2242
+12,Trashies#6767,VRX Kawii#ECHO,Operator,2828,212
+12,SirBrainz#3745,Gengar#0960,Vandal,-113,-5459
+13,Umbra#0202,VRX ProfPanda#Vyrox,Ghost,531,-1966
+13,Trashies#6767,Fruchtig#FOKUS,Ghost,-1232,-3059
+13,Luggi#IGL,VRX Saizsu#SRG,Ghost,266,-958
+13,VRX ProfPanda#Vyrox,Trashies#6767,Ghost,-145,-1916
+13,SirBrainz#3745,Luggi#IGL,Shock Bolt,827,-1173
+13,VRX Kawii#ECHO,Umbra#0202,Ghost,1118,-3080
+13,Gengar#0960,VRX Kawii#ECHO,Headhunter,-146,-3090
+13,Gengar#0960,SirBrainz#3745,Ghost,961,-1007
+14,Noctis#7705,VRX Kawii#ECHO,Stinger,1355,2241
+14,Noctis#7705,VRX Saizsu#SRG,Stinger,2181,3445
+14,Trashies#6767,VRX ProfPanda#Vyrox,Guardian,-1038,-4998
+14,Trashies#6767,Fruchtig#FOKUS,Guardian,950,876
+14,Trashies#6767,SirBrainz#3745,Guardian,2169,5957
+15,VRX Saizsu#SRG,Luggi#IGL,Vandal,239,-5183
+15,Fruchtig#FOKUS,Noctis#7705,Vandal,508,-3155
+15,Luggi#IGL,VRX ProfPanda#Vyrox,Bulldog,1491,-5472
+15,SirBrainz#3745,Umbra#0202,Phantom,-157,-3462
+15,SirBrainz#3745,Gengar#0960,Phantom,2893,-3302
+15,SirBrainz#3745,Trashies#6767,Phantom,113,-2107
+16,Noctis#7705,VRX ProfPanda#Vyrox,Vandal,1526,5469
+16,Noctis#7705,VRX Kawii#ECHO,Vandal,1562,3719
+16,Fruchtig#FOKUS,Trashies#6767,Vandal,-2743,-2308
+16,Fruchtig#FOKUS,Gengar#0960,Vandal,1963,3462
+16,VRX ProfPanda#Vyrox,Umbra#0202,Vandal,414,5190
+16,SirBrainz#3745,Noctis#7705,Phantom,1060,3948
+16,VRX Kawii#ECHO,Luggi#IGL,Vandal,1914,5507
+16,Gengar#0960,VRX Saizsu#SRG,Vandal,522,2315
+17,Noctis#7705,Fruchtig#FOKUS,Sheriff,-490,3441
+17,VRX Saizsu#SRG,Gengar#0960,Phantom,-1609,-2934
+17,Luggi#IGL,VRX ProfPanda#Vyrox,Vandal,625,-5182
+17,SirBrainz#3745,Trashies#6767,Phantom,-123,-4565
+17,SirBrainz#3745,Noctis#7705,Phantom,101,-3767
+17,SirBrainz#3745,Umbra#0202,Phantom,3201,-3465
+17,VRX Kawii#ECHO,Luggi#IGL,Vandal,-157,-3433
+18,Noctis#7705,VRX ProfPanda#Vyrox,Phantom,3844,4605
+18,Noctis#7705,VRX Kawii#ECHO,Phantom,2557,3442
+18,Umbra#0202,VRX Saizsu#SRG,Vandal,-654,1139
+18,Umbra#0202,Fruchtig#FOKUS,Vandal,-1112,3932
+18,Trashies#6767,SirBrainz#3745,Phantom,-1679,3125
+18,SirBrainz#3745,Umbra#0202,Phantom,-1239,2551
+18,SirBrainz#3745,Luggi#IGL,Hunter's Fury,1886,4252
+18,VRX Kawii#ECHO,Umbra#0202,Vandal,163,1354
+19,Noctis#7705,VRX Saizsu#SRG,Vandal,-1297,-2316
+19,VRX ProfPanda#Vyrox,Umbra#0202,Vandal,3198,-3519
+19,VRX ProfPanda#Vyrox,Trashies#6767,Vandal,-1576,-5252
+19,SirBrainz#3745,Noctis#7705,Phantom,-1507,-4575
+19,VRX Kawii#ECHO,Luggi#IGL,Phantom,3165,-2488
+20,Noctis#7705,Fruchtig#FOKUS,Stinger,2433,331
+20,Noctis#7705,VRX ProfPanda#Vyrox,Stinger,2053,128
+20,Noctis#7705,SirBrainz#3745,Stinger,2226,258
+20,Noctis#7705,VRX Saizsu#SRG,Vandal,737,-4557
+20,Noctis#7705,VRX Kawii#ECHO,Vandal,1383,-3560
+20,VRX Saizsu#SRG,Trashies#6767,Phantom,2452,-453
+20,Fruchtig#FOKUS,Luggi#IGL,Vandal,-1693,3490
+20,VRX Kawii#ECHO,Gengar#0960,Phantom,1414,-3607
