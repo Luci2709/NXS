@@ -10,6 +10,7 @@ import base64
 import calendar
 import io
 import numpy as np
+import time
 from datetime import datetime, date, timedelta
 from PIL import Image
 
@@ -52,9 +53,105 @@ st_image.image_to_url = custom_image_to_url
 # ⚠️ JETZT ERST DIE CANVAS LIBRARY IMPORTIEREN
 from streamlit_drawable_canvas import st_canvas
 
+# ==============================================================================
+# 🔐 AUTHENTICATION SYSTEM
+# ==============================================================================
 
-# --- CONFIG & THEME ---
+# User credentials (in production, use proper database/authentication)
+USER_CREDENTIALS = {
+    # Visitors - only dashboard access
+    "visitor1": {"password": "visitor123", "role": "visitor"},
+    "visitor2": {"password": "visitor123", "role": "visitor"},
+
+    # Players - all except database and match entry
+    "Luggi": {"password": "1", "role": "player"},
+    "player2": {"password": "player123", "role": "player"},
+    "player3": {"password": "player123", "role": "player"},
+    "player4": {"password": "player123", "role": "player"},
+    "player5": {"password": "player123", "role": "player"},
+
+    # Coaches - full access
+    "coach1": {"password": "coach123", "role": "coach"},
+    "coach2": {"password": "coach123", "role": "coach"},
+
+    # Testing - access to both coach and player features
+    "testing": {"password": "test123", "role": "testing"},
+}
+
+def check_credentials(username, password):
+    """Check if username/password combination is valid"""
+    if username in USER_CREDENTIALS:
+        if USER_CREDENTIALS[username]["password"] == password:
+            return USER_CREDENTIALS[username]["role"]
+    return None
+
+def get_allowed_pages(role):
+    """Return list of allowed pages for a given role"""
+    if role == "visitor":
+        return ["🏠 DASHBOARD"]
+    elif role == "player":
+        return ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS"]
+    elif role == "coach":
+        return ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "📝 MATCH ENTRY", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "💾 DATABASE"]
+    elif role == "testing":
+        return ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "📝 MATCH ENTRY", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "💾 DATABASE"]
+    return []
+
+def login_page():
+    """Display login page"""
+    st.title("🔐 NEXUS LOGIN")
+
+    st.markdown("---")
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+        st.markdown("### Welcome to NEXUS")
+        st.markdown("Please enter your credentials to access the system.")
+
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+
+            submitted = st.form_submit_button("Login", type="primary")
+
+            if submitted:
+                if not username or not password:
+                    st.error("Please enter both username and password.")
+                else:
+                    role = check_credentials(username, password)
+                    if role:
+                        st.session_state.authenticated = True
+                        st.session_state.username = username
+                        st.session_state.role = role
+                        st.session_state.allowed_pages = get_allowed_pages(role)
+                        st.success(f"Welcome {username}! Redirecting...")
+                        # Remove st.rerun() to avoid potential issues
+                        # st.rerun()
+                    else:
+                        st.error("Invalid username or password.")
+
+        st.markdown("---")
+        st.markdown("### Demo Accounts")
+        st.markdown("**Visitors:** visitor1/visitor2 (password: visitor123)")
+        st.markdown("**Players:** player1/player2/player3/player4/player5 (password: player123)")
+        st.markdown("**Coaches:** coach1/coach2 (password: coach123)")
+
+def logout():
+    """Logout user"""
+    for key in ['authenticated', 'username', 'role', 'allowed_pages']:
+        if key in st.session_state:
+            del st.session_state[key]
+    # Remove st.rerun() to avoid potential issues
+    # st.rerun()
+
+# ==============================================================================
 st.set_page_config(page_title="NXS Dashboard", layout="wide", page_icon="💠")
+
+# Check authentication first - must happen after page config
+if 'authenticated' not in st.session_state or not st.session_state.authenticated:
+    login_page()
+    st.stop()
 
 st.markdown("""
 <style>
@@ -189,6 +286,10 @@ TEAM_PLAYBOOKS_FILE = os.path.join(BASE_DIR, "data", "nexus_playbooks.csv")
 PB_STRATS_FILE = os.path.join(BASE_DIR, "data", "nexus_pb_strats.csv")
 MAP_THEORY_FILE = os.path.join(BASE_DIR, "data", "nexus_map_theory.csv")
 TODO_FILE = os.path.join(BASE_DIR, "data", "todo.csv")
+SCRIMS_FILE = os.path.join(BASE_DIR, "data", "scrims.csv")
+SCRIM_AVAILABILITY_FILE = os.path.join(BASE_DIR, "data", "scrim_availability.csv")
+PLAYER_TODOS_FILE = os.path.join(BASE_DIR, "data", "player_todos.csv")
+PLAYER_MESSAGES_FILE = os.path.join(BASE_DIR, "data", "player_messages.csv")
 ASSET_DIR = os.path.join(BASE_DIR, "assets")
 STRAT_IMG_DIR = os.path.join(ASSET_DIR, "strats")
 
@@ -243,9 +344,66 @@ def load_csv_generic(filepath, cols):
     if os.path.exists(filepath): return pd.read_csv(filepath)
     return pd.DataFrame(columns=cols)
 
+def update_availability(scrim_id, player, status):
+    """Update or create availability entry for a player"""
+    # Load existing availability data
+    try:
+        df_avail = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='utf-8')
+    except (UnicodeDecodeError, FileNotFoundError):
+        try:
+            df_avail = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='utf-16')
+        except (UnicodeDecodeError, FileNotFoundError):
+            df_avail = pd.DataFrame(columns=['ScrimID', 'Player', 'Available', 'UpdatedAt'])
+    
+    # Check if entry already exists
+    mask = (df_avail['ScrimID'] == scrim_id) & (df_avail['Player'] == player)
+    
+    if mask.any():
+        # Update existing entry
+        df_avail.loc[mask, 'Available'] = status
+        df_avail.loc[mask, 'UpdatedAt'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        # Create new entry
+        new_entry = {
+            'ScrimID': scrim_id,
+            'Player': player,
+            'Available': status,
+            'UpdatedAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        df_avail = pd.concat([df_avail, pd.DataFrame([new_entry])], ignore_index=True)
+    
+    # Save back to CSV with UTF-8 encoding using cached function
+    save_scrim_availability(df_avail)
+
+def delete_scrim(scrim_id):
+    """Delete a scrim and all its availability data"""
+    # Delete scrim from scrims file
+    try:
+        df_scrims = pd.read_csv(SCRIMS_FILE, encoding='utf-8')
+    except (UnicodeDecodeError, FileNotFoundError):
+        try:
+            df_scrims = pd.read_csv(SCRIMS_FILE, encoding='utf-16')
+        except (UnicodeDecodeError, FileNotFoundError):
+            df_scrims = pd.DataFrame(columns=['ID', 'Title', 'Date', 'Time', 'Map', 'Description', 'CreatedBy', 'CreatedAt'])
+    
+    # Remove the scrim
+    save_scrims(df_scrims)
+    
+    # Delete all availability data for this scrim
+    try:
+        df_avail = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='utf-8')
+    except (UnicodeDecodeError, FileNotFoundError):
+        try:
+            df_avail = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='utf-16')
+        except (UnicodeDecodeError, FileNotFoundError):
+            df_avail = pd.DataFrame(columns=['ScrimID', 'Player', 'Available', 'UpdatedAt'])
+    
+    # Remove availability data for this scrim
+    save_scrim_availability(df_avail)
+
 # --- DATA LOADER ---
-@st.cache_data(ttl=60)
-def load_data():
+@st.cache_data
+def load_data(dummy=None):
     # Matches
     df = pd.read_csv(DATA_FILE_CSV) if os.path.exists(DATA_FILE_CSV) else pd.DataFrame()
     if not df.empty:
@@ -257,23 +415,166 @@ def load_data():
     # Player Stats
     df_p = pd.read_csv(PLAYER_STATS_CSV) if os.path.exists(PLAYER_STATS_CSV) else pd.DataFrame()
     
-    return df, df_p
+    # Scrims
+    try:
+        df_scrims = pd.read_csv(SCRIMS_FILE, encoding='utf-8')
+    except (UnicodeDecodeError, FileNotFoundError):
+        try:
+            df_scrims = pd.read_csv(SCRIMS_FILE, encoding='utf-16')
+        except (UnicodeDecodeError, FileNotFoundError):
+            try:
+                df_scrims = pd.read_csv(SCRIMS_FILE, encoding='latin-1')
+            except (UnicodeDecodeError, FileNotFoundError):
+                df_scrims = pd.DataFrame(columns=['ID', 'Title', 'Date', 'Time', 'Map', 'Description', 'CreatedBy', 'CreatedAt'])
+    
+    if not df_scrims.empty:
+        df_scrims['DateTimeObj'] = pd.to_datetime(df_scrims['Date'] + ' ' + df_scrims['Time'], format="%Y-%m-%d %H:%M", errors='coerce')
+    
+    # Scrim Availability
+    try:
+        df_availability = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='utf-8')
+    except (UnicodeDecodeError, FileNotFoundError):
+        try:
+            df_availability = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='utf-16')
+        except (UnicodeDecodeError, FileNotFoundError):
+            try:
+                df_availability = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='latin-1')
+            except (UnicodeDecodeError, FileNotFoundError):
+                df_availability = pd.DataFrame(columns=['ScrimID', 'Player', 'Available', 'UpdatedAt'])
+    
+    # Player Todos
+    try:
+        df_todos = pd.read_csv(PLAYER_TODOS_FILE, encoding='utf-8')
+    except (UnicodeDecodeError, FileNotFoundError):
+        try:
+            df_todos = pd.read_csv(PLAYER_TODOS_FILE, encoding='utf-16')
+        except (UnicodeDecodeError, FileNotFoundError):
+            try:
+                df_todos = pd.read_csv(PLAYER_TODOS_FILE, encoding='latin-1')
+            except (UnicodeDecodeError, FileNotFoundError):
+                df_todos = pd.DataFrame(columns=['ID', 'Player', 'Title', 'Description', 'PlaybookLink', 'YoutubeLink', 'AssignedBy', 'AssignedAt', 'Completed', 'CompletedAt'])
+    
+    if not df_todos.empty:
+        df_todos['Completed'] = df_todos['Completed'].map({'True': True, 'False': False})
+    
+    # Player Messages
+    try:
+        df_messages = pd.read_csv(PLAYER_MESSAGES_FILE, encoding='utf-8')
+    except (UnicodeDecodeError, FileNotFoundError):
+        try:
+            df_messages = pd.read_csv(PLAYER_MESSAGES_FILE, encoding='utf-16')
+        except (UnicodeDecodeError, FileNotFoundError):
+            try:
+                df_messages = pd.read_csv(PLAYER_MESSAGES_FILE, encoding='latin-1')
+            except (UnicodeDecodeError, FileNotFoundError):
+                df_messages = pd.DataFrame(columns=['ID', 'FromUser', 'ToUser', 'Message', 'SentAt', 'Read'])
+    
+    if not df_messages.empty:
+        df_messages['Read'] = df_messages['Read'].map({'True': True, 'False': False})
+    
+    return df, df_p, df_scrims, df_availability, df_todos, df_messages
+
+# Data saving functions that clear cache
+def save_scrim_availability(df_availability):
+    """Save scrim availability and clear cache"""
+    df_availability.to_csv(SCRIM_AVAILABILITY_FILE, index=False, encoding='utf-8')
+    load_data.clear()
+
+def save_player_todos(df_todos):
+    """Save player todos"""
+    df_todos.to_csv(PLAYER_TODOS_FILE, index=False, encoding='utf-8')
+
+def save_player_messages(df_messages):
+    """Save player messages"""
+    df_messages.to_csv(PLAYER_MESSAGES_FILE, index=False, encoding='utf-8')
+
+def save_scrims(df_scrims):
+    """Save scrims and clear cache"""
+    df_scrims.to_csv(SCRIMS_FILE, index=False, encoding='utf-8')
+    load_data.clear()
 
 # --- UI START ---
-df, df_players = load_data()
+df, df_players, df_scrims, df_availability, df_todos, df_messages = load_data(time.time())
+
+# Handle navigation triggers
+if "trigger_navigation" in st.session_state:
+    st.session_state["navigation_radio"] = st.session_state["trigger_navigation"]
+    del st.session_state["trigger_navigation"]
 
 with st.sidebar:
     if os.path.exists("logo.png"): st.image("logo.png", width=140)
     st.title("NEXUS")
-    page = st.radio("NAVIGATION", ["🏠 DASHBOARD", "📝 MATCH ENTRY", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "💾 DATABASE"], label_visibility="collapsed")
+    
+    # Filter navigation based on user role
+    all_pages = ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "📝 MATCH ENTRY", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "💾 DATABASE"]
+    allowed_pages = st.session_state.get('allowed_pages', all_pages)
+    
+    page = st.radio("NAVIGATION", allowed_pages, label_visibility="collapsed", key="navigation_radio")
     st.markdown("---")
-    if st.button("🔄 RELOAD DATA"): st.cache_data.clear(); st.rerun()
+    if st.button("🔄 RELOAD DATA"): st.rerun()
+    
+    # Add logout button
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"**User:** {st.session_state.get('username', 'Unknown')}")
+    with col2:
+        if st.button("🚪 LOGOUT"):
+            logout()
 
 # ==============================================================================
 # 1. DASHBOARD
 # ==============================================================================
 if page == "🏠 DASHBOARD":
+    # Get current user info for notifications
+    current_user = st.session_state.get('username', '')
+    user_role = st.session_state.get('role', '')
+    
+    # --- FIX: Variablen standardmäßig initialisieren, um NameError zu verhindern ---
+    incomplete_todos = 0
+    unread_messages = 0
+    # ------------------------------------------------------------------------------
+
+    # Player notifications for todos and messages
+    if user_role == 'player' and current_user:
+        # Check for incomplete todos
+        player_todos = df_todos[(df_todos['Player'] == current_user) & (df_todos['Completed'] == False)] if not df_todos.empty else pd.DataFrame()
+        incomplete_todos = len(player_todos)
+        
+        # Check for unread messages
+        player_messages = df_messages[(df_messages['ToUser'] == current_user) & (df_messages['Read'] == False)] if not df_messages.empty else pd.DataFrame()
+        unread_messages = len(player_messages)
+        
+        # Show notification popup above everything
+        if incomplete_todos > 0 or unread_messages > 0:
+            if incomplete_todos > 0 and unread_messages > 0:
+                st.info(f"🔔 You have {incomplete_todos} pending task(s) and {unread_messages} unread message(s)!")
+            elif incomplete_todos > 0:
+                st.info(f"🔔 You have {incomplete_todos} pending task(s)!")
+            elif unread_messages > 0:
+                st.info(f"🔔 You have {unread_messages} unread message(s)!")
+    
     st.title("PERFORMANCE DASHBOARD")
+    
+    # Button logic for notifications (Falls gewünscht, hier bereinigt)
+    if (incomplete_todos > 0 or unread_messages > 0) and user_role == 'player':
+        st.markdown("---")
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            notification_text = ""
+            if incomplete_todos > 0 and unread_messages > 0:
+                notification_text = f"🔔 You have {incomplete_todos} pending task(s) and {unread_messages} unread message(s)!"
+            elif incomplete_todos > 0:
+                notification_text = f"🔔 You have {incomplete_todos} pending task(s)!"
+            elif unread_messages > 0:
+                notification_text = f"🔔 You have {unread_messages} unread message(s)!"
+            
+            if st.button(notification_text, type="primary", use_container_width=True):
+                st.session_state["navigation_radio"] = "👥 COACHING"
+                st.rerun()
+        st.markdown("---")
+    
+    # --- Statistiken und Charts ---
     if not df.empty:
         min_date = df['DateObj'].min() if pd.notna(df['DateObj'].min()) else datetime(2024,1,1)
         c1, c2 = st.columns([1,3])
@@ -307,8 +608,9 @@ if page == "🏠 DASHBOARD":
             # --- TABLE ---
             st.divider(); st.markdown("### 🏆 POWER RANKING")
             rank_df = pd.DataFrame(conf_list).rename(columns={'M':'Map','S':'Score','WR':'Winrate'})
-            rank_df['MapImg'] = rank_df['Map'].apply(lambda x: f"data:image/png;base64,{img_to_b64(get_map_img(x, 'list'))}")
-            st.dataframe(rank_df[['MapImg','Map','Score','Winrate']], column_config={"MapImg":st.column_config.ImageColumn("Map",width="small"), "Score":st.column_config.ProgressColumn("Rating",format="%.1f",min_value=0,max_value=max(rank_df['Score'])+10), "Winrate":st.column_config.ProgressColumn("Win%",format="%.0f%%",min_value=0,max_value=100)}, use_container_width=True, hide_index=True)
+            if not rank_df.empty:
+                rank_df['MapImg'] = rank_df['Map'].apply(lambda x: f"data:image/png;base64,{img_to_b64(get_map_img(x, 'list'))}")
+                st.dataframe(rank_df[['MapImg','Map','Score','Winrate']], column_config={"MapImg":st.column_config.ImageColumn("Map",width="small"), "Score":st.column_config.ProgressColumn("Rating",format="%.1f",min_value=0,max_value=max(rank_df['Score'])+10), "Winrate":st.column_config.ProgressColumn("Win%",format="%.0f%%",min_value=0,max_value=100)}, use_container_width=True, hide_index=True)
             
             # --- RECENT ---
             st.divider(); st.markdown("### RECENT ACTIVITY")
@@ -323,6 +625,7 @@ if page == "🏠 DASHBOARD":
                         if img: st.image(img, use_container_width=True)
                     with c2: st.markdown(f"**{row['Map']}**"); st.caption(f"{row['Date']}")
                     with c3:
+                        # Display comps
                         mh=""; eh=""
                         for i in range(1,6):
                             if pd.notna(row.get(f'MyComp_{i}')): 
@@ -333,8 +636,670 @@ if page == "🏠 DASHBOARD":
                                 if b64: eh+=f"<img src='data:image/png;base64,{b64}' width='25' style='margin-right:3px'>"
                         if mh: st.markdown(f"<div class='comp-box-my'>{mh}</div>", unsafe_allow_html=True)
                         if eh: st.markdown(f"<div class='comp-box-en'>{eh}</div>", unsafe_allow_html=True)
+                        
+                        # Individual stat boxes
+                        stat_boxes = []
+                        
+                        # W/L box
+                        wl_color = "#00ff80" if res == 'W' else "#ff1493"
+                        bg_color = "#002200" if res == 'W' else "#220000"
+                        stat_boxes.append(f"<div style='background-color: {bg_color}; color: {wl_color}; padding: 2px 6px; border-radius: 3px; display: inline-block; margin: 1px; font-size: 0.7em; font-weight: bold;'>{res}</div>")
+                        
+                        # +/- box
+                        delta = int(row['Score_Us']) - int(row['Score_Enemy'])
+                        delta_color = "#00ff80" if delta > 0 else "#ff1493" if delta < 0 else "#ffeb3b"
+                        bg_color = "#002200" if delta > 0 else "#220000" if delta < 0 else "#222200"
+                        stat_boxes.append(f"<div style='background-color: {bg_color}; color: {delta_color}; padding: 2px 6px; border-radius: 3px; display: inline-block; margin: 1px; font-size: 0.7em; font-weight: bold;'>{delta:+d}</div>")
+                        
+                        # Round stats if available
+                        if pd.notna(row.get('Atk_R_W')) and pd.notna(row.get('Def_R_W')):
+                            atk_rw = int(row['Atk_R_W'])
+                            def_rw = int(row['Def_R_W'])
+                            total_rw = atk_rw + def_rw
+                            rw_color = "#00ff80" if total_rw >= 6 else "#ffeb3b" if total_rw >= 3 else "#ff1493"
+                            bg_color = "#002200" if total_rw >= 6 else "#222200" if total_rw >= 3 else "#220000"
+                            stat_boxes.append(f"<div style='background-color: {bg_color}; color: {rw_color}; padding: 2px 6px; border-radius: 3px; display: inline-block; margin: 1px; font-size: 0.7em; font-weight: bold;'>RW:{total_rw}</div>")
+                        
+                        if pd.notna(row.get('Atk_R_L')) and pd.notna(row.get('Def_R_L')):
+                            atk_rl = int(row['Atk_R_L'])
+                            def_rl = int(row['Def_R_L'])
+                            total_rl = atk_rl + def_rl
+                            rl_color = "#ff1493" if total_rl >= 6 else "#ffeb3b" if total_rl >= 3 else "#00ff80"
+                            bg_color = "#220000" if total_rl >= 6 else "#222200" if total_rl >= 3 else "#002200"
+                            stat_boxes.append(f"<div style='background-color: {bg_color}; color: {rl_color}; padding: 2px 6px; border-radius: 3px; display: inline-block; margin: 1px; font-size: 0.7em; font-weight: bold;'>RL:{total_rl}</div>")
+                        
+                        # Attack/Defense stats if available
+                        if pd.notna(row.get('Atk_R_W')) and pd.notna(row.get('Atk_R_L')):
+                            atk_total = int(row['Atk_R_W']) + int(row['Atk_R_L'])
+                            atk_color = "#00ff80" if atk_total >= 6 else "#ffeb3b" if atk_total >= 3 else "#ff1493"
+                            bg_color = "#002200" if atk_total >= 6 else "#222200" if atk_total >= 3 else "#220000"
+                            stat_boxes.append(f"<div style='background-color: {bg_color}; color: {atk_color}; padding: 2px 6px; border-radius: 3px; display: inline-block; margin: 1px; font-size: 0.7em; font-weight: bold;'>A:{atk_total}</div>")
+                        
+                        if pd.notna(row.get('Def_R_W')) and pd.notna(row.get('Def_R_L')):
+                            def_total = int(row['Def_R_W']) + int(row['Def_R_L'])
+                            def_color = "#00ff80" if def_total >= 6 else "#ffeb3b" if def_total >= 3 else "#ff1493"
+                            bg_color = "#002200" if def_total >= 6 else "#222200" if def_total >= 3 else "#220000"
+                            stat_boxes.append(f"<div style='background-color: {bg_color}; color: {def_color}; padding: 2px 6px; border-radius: 3px; display: inline-block; margin: 1px; font-size: 0.7em; font-weight: bold;'>D:{def_total}</div>")
+                        
+                        # Display all stat boxes
+                        if stat_boxes:
+                            stats_html = "<div style='margin-top: 5px;'>" + "".join(stat_boxes) + "</div>"
+                            st.markdown(stats_html, unsafe_allow_html=True)
                     with c4: st.markdown(f"<h3 style='color:{b}; margin:0; text-align:right'>{int(row['Score_Us'])}:{int(row['Score_Enemy'])}</h3>", unsafe_allow_html=True)
                     st.markdown("</div>", unsafe_allow_html=True)
+
+# ==============================================================================
+# 👥 COACHING
+# ==============================================================================
+elif page == "👥 COACHING":
+    st.title("👥 PLAYER COACHING")
+    
+    # Get current user info
+    current_user = st.session_state.get('username', '')
+    user_role = st.session_state.get('role', '')
+    
+    # Testing role context switcher
+    if user_role == 'testing':
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 Switch to Coach View", type="primary", use_container_width=True):
+                st.session_state.testing_context = 'coach'
+                st.rerun()
+        with col2:
+            if st.button("🔄 Switch to Player View", type="secondary", use_container_width=True):
+                st.session_state.testing_context = 'player'
+                st.rerun()
+        
+        # Show current context
+        current_context = st.session_state.get('testing_context', 'coach')
+        st.info(f"🧪 **Testing Mode**: Currently viewing as **{current_context.upper()}**")
+        user_role = current_context  # Override role for the rest of the page
+        st.markdown("---")
+    
+    if user_role == 'coach':
+        # Coach view - manage all players
+        tab1, tab2, tab3 = st.tabs(["📝 Assign Todos", "💬 Send Messages", "📊 Player Overview"])
+        
+        with tab1:
+            st.markdown("### 📝 Assign Tasks to Players")
+            
+            # Load playbooks for linking
+            try:
+                df_legacy_pb = pd.read_csv(PLAYBOOKS_FILE, encoding='utf-8')
+            except:
+                df_legacy_pb = pd.DataFrame()
+            
+            try:
+                df_team_pb = pd.read_csv(TEAM_PLAYBOOKS_FILE, encoding='utf-8')
+            except:
+                df_team_pb = pd.DataFrame()
+            
+            with st.form("assign_todo"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    player = st.selectbox("Select Player", 
+                                        ["player1", "player2", "player3", "player4", "player5"],
+                                        format_func=lambda x: f"🎮 {x}")
+                    title = st.text_input("Task Title", placeholder="e.g., Review Ascent Defense")
+                
+                with col2:
+                    # Playbook selection
+                    all_playbooks = []
+                    if not df_legacy_pb.empty:
+                        legacy_pbs = [f"Legacy: {pb}" for pb in df_legacy_pb.get('Name', [])]
+                        all_playbooks.extend(legacy_pbs)
+                    if not df_team_pb.empty:
+                        team_pbs = [f"Team: {pb}" for pb in df_team_pb.get('Name', [])]
+                        all_playbooks.extend(team_pbs)
+                    
+                    playbook_link = st.selectbox("Link Playbook (optional)", 
+                                               ["None"] + all_playbooks,
+                                               help="Select a playbook to link to this task")
+                    
+                    youtube_link = st.text_input("YouTube Link (optional)", 
+                                               placeholder="https://youtube.com/watch?v=...")
+                
+                description = st.text_area("Task Description", 
+                                         placeholder="Detailed instructions for the player...")
+                
+                submitted = st.form_submit_button("📤 Assign Task")
+                
+                if submitted:
+                    if not title or not description:
+                        st.error("Please fill in title and description.")
+                    else:
+                        # Create todo
+                        todo_id = str(uuid.uuid4())[:8]
+                        
+                        # Process playbook link
+                        final_pb_link = ""
+                        if playbook_link != "None":
+                            if playbook_link.startswith("Legacy: "):
+                                pb_name = playbook_link.replace("Legacy: ", "")
+                                if not df_legacy_pb.empty:
+                                    matching_pb = df_legacy_pb[df_legacy_pb['Name'] == pb_name]
+                                    if not matching_pb.empty:
+                                        final_pb_link = f"Legacy Playbook: {pb_name}"
+                            elif playbook_link.startswith("Team: "):
+                                pb_name = playbook_link.replace("Team: ", "")
+                                if not df_team_pb.empty:
+                                    matching_pb = df_team_pb[df_team_pb['Name'] == pb_name]
+                                    if not matching_pb.empty:
+                                        final_pb_link = f"Team Playbook: {pb_name}"
+                        
+                        new_todo = {
+                            'ID': todo_id,
+                            'Player': player,
+                            'Title': title,
+                            'Description': description,
+                            'PlaybookLink': final_pb_link,
+                            'YoutubeLink': youtube_link if youtube_link else "",
+                            'AssignedBy': current_user,
+                            'AssignedAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            'Completed': False,
+                            'CompletedAt': ""
+                        }
+                        
+                        # Save to CSV using cached function
+                        updated_todos = pd.concat([df_todos, pd.DataFrame([new_todo])], ignore_index=True)
+                        save_player_todos(updated_todos)
+                        
+                        st.success(f"Task '{title}' assigned to {player}!")
+                        st.rerun()
+        
+        with tab2:
+            st.markdown("### 💬 Chat with Players")
+            
+            # Select player to chat with
+            chat_player = st.selectbox("Chat with", 
+                                     ["player1", "player2", "player3", "player4", "player5"],
+                                     format_func=lambda x: f"🎮 {x}",
+                                     key="chat_player_select")
+            
+            if chat_player:
+                st.markdown(f"### 💬 Chat with {chat_player}")
+                
+                # Display chat history
+                chat_messages = df_messages[
+                    ((df_messages['FromUser'] == current_user) & (df_messages['ToUser'] == chat_player)) |
+                    ((df_messages['FromUser'] == chat_player) & (df_messages['ToUser'] == current_user))
+                ].sort_values('SentAt') if not df_messages.empty else pd.DataFrame()
+                
+                # Chat container
+                chat_container = st.container(height=400)
+                
+                with chat_container:
+                    if chat_messages.empty:
+                        st.info(f"No messages with {chat_player} yet. Start the conversation!")
+                    else:
+                        for _, msg in chat_messages.iterrows():
+                            is_from_coach = msg['FromUser'] == current_user
+                            
+                            col1, col2, col3 = st.columns([1, 3, 1])
+                            
+                            with col1 if is_from_coach else col3:
+                                sender = "You" if is_from_coach else msg['FromUser']
+                                st.caption(f"**{sender}**")
+                            
+                            with col2:
+                                # Message bubble styling
+                                bubble_style = "background-color: #007bff; color: white; padding: 10px; border-radius: 15px; margin: 5px 0;" if is_from_coach else "background-color: #f1f1f1; color: black; padding: 10px; border-radius: 15px; margin: 5px 0;"
+                                st.markdown(f"<div style='{bubble_style}'>{msg['Message']}</div>", unsafe_allow_html=True)
+                            
+                            with col3 if is_from_coach else col1:
+                                st.caption(msg['SentAt'])
+                
+                # Message input
+                message_key = f"chat_input_{chat_player}"
+                if message_key not in st.session_state:
+                    st.session_state[message_key] = ""
+                
+                # Clear input if just submitted
+                if st.session_state.get('just_submitted', False):
+                    st.session_state[message_key] = ""
+                    st.session_state['just_submitted'] = False
+                
+                with st.form(key=f"chat_form_{chat_player}"):
+                    message = st.text_input("Type your message...", 
+                                          value=st.session_state[message_key], 
+                                          key=message_key)
+                    submitted = st.form_submit_button("📤 Send")
+                    
+                    if submitted and message.strip():
+                        # Mark as just submitted to clear input on next run
+                        st.session_state['just_submitted'] = True
+                        
+                        # Create message
+                        message_id = str(uuid.uuid4())[:8]
+                        
+                        new_message = {
+                            'ID': message_id,
+                            'FromUser': current_user,
+                            'ToUser': chat_player,
+                            'Message': message.strip(),
+                            'SentAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            'Read': False
+                        }
+                        
+                        # Save to CSV using cached function
+                        updated_messages = pd.concat([df_messages, pd.DataFrame([new_message])], ignore_index=True)
+                        save_player_messages(updated_messages)
+                        
+                        st.success("Message sent!")
+                        st.rerun()
+        
+        with tab3:
+            st.markdown("### 📊 Player Overview")
+            
+            players = ["player1", "player2", "player3", "player4", "player5"]
+            
+            for player in players:
+                with st.expander(f"🎮 {player}", expanded=False):
+                    col1, col2, col3 = st.columns(3)
+                    
+                    # Task stats
+                    player_todos = df_todos[df_todos['Player'] == player] if not df_todos.empty else pd.DataFrame()
+                    completed_tasks = len(player_todos[player_todos['Completed'] == True]) if not player_todos.empty else 0
+                    total_tasks = len(player_todos) if not player_todos.empty else 0
+                    
+                    with col1:
+                        st.metric("Tasks Completed", f"{completed_tasks}/{total_tasks}")
+                        if total_tasks > 0:
+                            completion_rate = int((completed_tasks / total_tasks) * 100)
+                            st.progress(completion_rate / 100)
+                            st.caption(f"{completion_rate}% completion rate")
+                    
+                    # Message stats
+                    player_messages = df_messages[df_messages['ToUser'] == player] if not df_messages.empty else pd.DataFrame()
+                    unread_messages = len(player_messages[player_messages['Read'] == False]) if not player_messages.empty else 0
+                    
+                    with col2:
+                        st.metric("Unread Messages", unread_messages)
+                        if unread_messages > 0:
+                            st.warning(f"{unread_messages} unread message(s)")
+                        else:
+                            st.success("All messages read")
+                    
+                    # Scrim availability
+                    player_availability = df_availability[df_availability['Player'] == player] if not df_availability.empty else pd.DataFrame()
+                    available_count = len(player_availability[player_availability['Available'] == 'Yes']) if not player_availability.empty else 0
+                    total_scrims = len(df_scrims) if not df_scrims.empty else 0
+                    
+                    with col3:
+                        if total_scrims > 0:
+                            availability_rate = int((available_count / total_scrims) * 100)
+                            st.metric("Scrim Availability", f"{availability_rate}%")
+                            st.progress(availability_rate / 100)
+                        else:
+                            st.metric("Scrim Availability", "N/A")
+    
+    elif user_role == 'player':
+        # Player view - see their own tasks and messages
+        
+        # Check for notifications
+        player_todos = df_todos[(df_todos['Player'] == current_user) & (df_todos['Completed'] == False)] if not df_todos.empty else pd.DataFrame()
+        incomplete_todos = len(player_todos)
+        player_messages = df_messages[(df_messages['ToUser'] == current_user) & (df_messages['Read'] == False)] if not df_messages.empty else pd.DataFrame()
+        unread_messages = len(player_messages)
+        
+        # Load playbooks for linking
+        try:
+            df_legacy_pb = pd.read_csv(PLAYBOOKS_FILE, encoding='utf-8')
+        except:
+            df_legacy_pb = pd.DataFrame()
+        
+        try:
+            df_team_pb = pd.read_csv(TEAM_PLAYBOOKS_FILE, encoding='utf-8')
+        except:
+            df_team_pb = pd.DataFrame()
+        
+        tab1, tab2 = st.tabs(["📋 My Tasks", "💬 My Messages"])
+        
+        with tab1:
+            st.markdown("### 📋 My Assigned Tasks")
+            
+            if df_todos.empty:
+                st.info("No tasks assigned yet.")
+            else:
+                player_todos = df_todos[df_todos['Player'] == current_user]
+                
+                if player_todos.empty:
+                    st.info("No tasks assigned to you yet.")
+                else:
+                    for _, todo in player_todos.iterrows():
+                        completed = todo['Completed']
+                        status_icon = "✅" if completed else "⏳"
+                        
+                        with st.expander(f"{status_icon} {todo['Title']}", expanded=not completed):
+                            st.markdown(f"**Assigned by:** {todo['AssignedBy']}")
+                            st.markdown(f"**Assigned:** {todo['AssignedAt']}")
+                            st.markdown(f"**Description:** {todo['Description']}")
+                            
+                            if todo['PlaybookLink']:
+                                if todo['PlaybookLink'].startswith("Team Playbook: "):
+                                    pb_name = todo['PlaybookLink'].replace("Team Playbook: ", "")
+                                    if not df_team_pb.empty:
+                                        matching_pb = df_team_pb[df_team_pb['Name'] == pb_name]
+                                        if not matching_pb.empty:
+                                            pb_id = matching_pb.iloc[0]['ID']
+                                            if st.button(f"📖 Open Playbook: {pb_name}", key=f"open_pb_{todo['ID']}"):
+                                                st.session_state["trigger_navigation"] = "📘 STRATEGY BOARD"
+                                                st.session_state['sel_pb_id'] = pb_id
+                                                st.rerun()
+                                        else:
+                                            st.markdown(f"**📖 Playbook:** {todo['PlaybookLink']} (not found)")
+                                    else:
+                                        st.markdown(f"**📖 Playbook:** {todo['PlaybookLink']}")
+                                elif todo['PlaybookLink'].startswith("Legacy Playbook: "):
+                                    pb_name = todo['PlaybookLink'].replace("Legacy Playbook: ", "")
+                                    if not df_legacy_pb.empty:
+                                        matching_pb = df_legacy_pb[df_legacy_pb['Name'] == pb_name]
+                                        if not matching_pb.empty:
+                                            pb_link = matching_pb.iloc[0].get('Link', '')
+                                            if pb_link:
+                                                st.markdown(f"**📖 Playbook:** [{pb_name}]({pb_link})")
+                                            else:
+                                                st.markdown(f"**📖 Playbook:** {pb_name}")
+                                        else:
+                                            st.markdown(f"**📖 Playbook:** {todo['PlaybookLink']} (not found)")
+                                    else:
+                                        st.markdown(f"**📖 Playbook:** {todo['PlaybookLink']}")
+                                else:
+                                    st.markdown(f"**📖 Playbook:** {todo['PlaybookLink']}")
+                            
+                            if todo['YoutubeLink']:
+                                st.markdown(f"**📺 YouTube:** [{todo['YoutubeLink']}]({todo['YoutubeLink']})")
+                            
+                            if not completed:
+                                if st.button("✅ Mark as Completed", key=f"complete_{todo['ID']}"):
+                                    # Mark as completed
+                                    df_todos.loc[df_todos['ID'] == todo['ID'], 'Completed'] = True
+                                    df_todos.loc[df_todos['ID'] == todo['ID'], 'CompletedAt'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    save_player_todos(df_todos)
+                                    st.success("Task marked as completed!")
+                                    st.rerun()
+                            else:
+                                st.success(f"✅ Completed on {todo['CompletedAt']}")
+        
+        with tab2:
+            st.markdown("### 💬 Chat with Coaches")
+            
+            # Get unique coaches who have messaged this player
+            coach_conversations = df_messages[
+                (df_messages['ToUser'] == current_user) | (df_messages['FromUser'] == current_user)
+            ]['FromUser'].unique() if not df_messages.empty else []
+            
+            coach_conversations = [c for c in coach_conversations if c != current_user]
+            
+            if not coach_conversations:
+                st.info("No conversations yet. Coaches will reach out to you here!")
+            else:
+                # Select coach to chat with
+                selected_coach = st.selectbox("Chat with", 
+                                            coach_conversations,
+                                            format_func=lambda x: f"👨‍🏫 {x}",
+                                            key="player_chat_select")
+                
+                if selected_coach:
+                    st.markdown(f"### 💬 Chat with {selected_coach}")
+                    
+                    # Display chat history
+                    chat_messages = df_messages[
+                        ((df_messages['FromUser'] == current_user) & (df_messages['ToUser'] == selected_coach)) |
+                        ((df_messages['FromUser'] == selected_coach) & (df_messages['ToUser'] == current_user))
+                    ].sort_values('SentAt') if not df_messages.empty else pd.DataFrame()
+                    
+                    # Chat container
+                    chat_container = st.container(height=400)
+                    
+                    with chat_container:
+                        if chat_messages.empty:
+                            st.info(f"No messages with {selected_coach} yet.")
+                        else:
+                            for _, msg in chat_messages.iterrows():
+                                is_from_player = msg['FromUser'] == current_user
+                                
+                                col1, col2, col3 = st.columns([1, 3, 1])
+                                
+                                with col1 if is_from_player else col3:
+                                    sender = "You" if is_from_player else msg['FromUser']
+                                    st.caption(f"**{sender}**")
+                                
+                                with col2:
+                                    # Message bubble styling
+                                    bubble_style = "background-color: #28a745; color: white; padding: 10px; border-radius: 15px; margin: 5px 0;" if is_from_player else "background-color: #f1f1f1; color: black; padding: 10px; border-radius: 15px; margin: 5px 0;"
+                                    st.markdown(f"<div style='{bubble_style}'>{msg['Message']}</div>", unsafe_allow_html=True)
+                                
+                                with col3 if is_from_player else col1:
+                                    st.caption(msg['SentAt'])
+                    
+                    # Mark messages as read
+                    unread_messages = chat_messages[
+                        (chat_messages['ToUser'] == current_user) & (chat_messages['Read'] == False)
+                    ]
+                    
+                    if not unread_messages.empty:
+                        if st.button(f"Mark {len(unread_messages)} messages as read", key=f"mark_read_{selected_coach}"):
+                            for msg_id in unread_messages['ID']:
+                                df_messages.loc[df_messages['ID'] == msg_id, 'Read'] = True
+                            save_player_messages(df_messages)
+                            st.success("Messages marked as read!")
+                            st.rerun()
+
+# ==============================================================================
+# ⚽ SCRIMS
+# ==============================================================================
+elif page == "⚽ SCRIMS":
+    st.title("⚽ SCRIM SCHEDULER")
+    
+    # Get current user info
+    current_user = st.session_state.get('username', '')
+    user_role = st.session_state.get('role', '')
+    
+    tab1, tab2 = st.tabs(["📅 View Scrims", "➕ Create Scrim"])
+    
+    with tab1:
+        if user_role in ['player', 'coach']:
+            # Player/Couch view - compact overview
+            st.markdown("### 📅 Your Scrim Overview")
+            
+            if df_scrims.empty:
+                st.info("No scrims scheduled yet.")
+            else:
+                # Sort by date/time
+                df_scrims_sorted = df_scrims.sort_values('DateTimeObj', ascending=True)
+                
+                # Summary stats
+                total_scrims = len(df_scrims_sorted)
+                upcoming_scrims = len(df_scrims_sorted[df_scrims_sorted['DateTimeObj'] >= pd.Timestamp.now()])
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Scrims", total_scrims)
+                with col2:
+                    st.metric("Upcoming", upcoming_scrims)
+                with col3:
+                    # Calculate user's availability rate
+                    if not df_availability.empty:
+                        user_responses = len(df_availability[df_availability['Player'] == current_user])
+                        user_available = len(df_availability[(df_availability['Player'] == current_user) & (df_availability['Available'] == 'Yes')])
+                        if user_responses > 0:
+                            availability_rate = int((user_available / user_responses) * 100)
+                            st.metric("Your Availability", f"{availability_rate}%")
+                        else:
+                            st.metric("Your Availability", "0%")
+                    else:
+                        st.metric("Your Availability", "0%")
+                
+                st.markdown("---")
+                
+                # Scrim overview table
+                st.markdown("### 🎯 Scrim Status")
+                
+                # Initialize session state for instant updates
+                if 'availability_updates' not in st.session_state:
+                    st.session_state.availability_updates = {}
+                
+                for _, scrim in df_scrims_sorted.iterrows():
+                    scrim_id = scrim['ID']
+                    availability_data = df_availability[df_availability['ScrimID'] == scrim_id] if not df_availability.empty else pd.DataFrame()
+                    
+                    # Check for instant updates from session state
+                    instant_status = st.session_state.availability_updates.get(scrim_id)
+                    
+                    # Get user's current status (prefer instant update over database)
+                    user_status = instant_status if instant_status else "Not Responded"
+                    if not instant_status and not availability_data.empty:
+                        user_availability = availability_data[availability_data['Player'] == current_user]
+                        if not user_availability.empty:
+                            user_status = user_availability['Available'].iloc[0]
+                    
+                    # Calculate availability stats (include instant updates)
+                    if not availability_data.empty:
+                        available_count = len(availability_data[availability_data['Available'] == 'Yes'])
+                        total_responses = len(availability_data)
+                        # Add instant update to count if it exists
+                        if instant_status == 'Yes':
+                            available_count += 1
+                            if user_status == "Not Responded":  # New response
+                                total_responses += 1
+                        elif instant_status and instant_status != "Not Responded":
+                            total_responses += 1  # New response but not available
+                        availability_text = f"{available_count}/{total_responses} available"
+                    else:
+                        availability_text = "No responses yet"
+                        if instant_status and instant_status != "Not Responded":
+                            availability_text = f"1/1 available" if instant_status == 'Yes' else "0/1 available"
+                    
+                    # Status color coding
+                    status_color = {
+                        "Yes": "🟢",
+                        "No": "🔴", 
+                        "Maybe": "🟡",
+                        "Not Responded": "⚪"
+                    }.get(user_status, "⚪")
+                    
+                    # Create card for each scrim
+                    with st.container():
+                        col1, col2, col3, col4 = st.columns([3, 2, 2, 3])
+                        
+                        with col1:
+                            st.markdown(f"**{scrim['Title']}**")
+                            st.caption(f"{scrim['Date']} at {scrim['Time']}")
+                            if 'Map' in scrim and pd.notna(scrim['Map']):
+                                st.caption(f"🗺️ {scrim['Map']}")
+                        
+                        with col2:
+                            st.markdown(f"{status_color} **{user_status}**")
+                        
+                        with col3:
+                            st.caption(availability_text)
+                        
+                        with col4:
+                            if user_role == 'coach':
+                                # Coach controls
+                                st.markdown("**Coach Controls:**")
+                                del_col1, del_col2 = st.columns(2)
+                                with del_col1:
+                                    if st.button("🗑️ Delete", key=f"delete_{scrim_id}", 
+                                               help="Delete this scrim"):
+                                        delete_scrim(scrim_id)
+                                        st.rerun()
+                                with del_col2:
+                                    st.caption("⚙️ Manage")
+                            else:
+                                # Player buttons
+                                btn_col1, btn_col2, btn_col3 = st.columns(3)
+                                with btn_col1:
+                                    if st.button("✅", key=f"quick_yes_{scrim_id}", help="Mark as Available"):
+                                        st.session_state.availability_updates[scrim_id] = "Yes"
+                                        update_availability(scrim_id, current_user, "Yes")
+                                with btn_col2:
+                                    if st.button("❌", key=f"quick_no_{scrim_id}", help="Mark as Not Available"):
+                                        st.session_state.availability_updates[scrim_id] = "No"
+                                        update_availability(scrim_id, current_user, "No")
+                                with btn_col3:
+                                    if st.button("🤔", key=f"quick_maybe_{scrim_id}", help="Mark as Maybe"):
+                                        st.session_state.availability_updates[scrim_id] = "Maybe"
+                                        update_availability(scrim_id, current_user, "Maybe")
+                    
+                    st.markdown("---")
+        
+        else:
+            # Visitor view - limited info
+            st.markdown("### 📅 Upcoming Scrims")
+            
+            if df_scrims.empty:
+                st.info("No scrims scheduled yet.")
+            else:
+                df_scrims_sorted = df_scrims.sort_values('DateTimeObj', ascending=True)
+                
+                for _, scrim in df_scrims_sorted.iterrows():
+                    with st.expander(f"⚽ {scrim['Title']} - {scrim['Date']} {scrim['Time']}", expanded=False):
+                        col1, col2 = st.columns([2, 1])
+                        
+                        with col1:
+                            st.markdown(f"**Date:** {scrim['Date']}")
+                            st.markdown(f"**Time:** {scrim['Time']}")
+                            st.markdown(f"**Description:** {scrim['Description']}")
+                            st.markdown(f"**Created by:** {scrim['CreatedBy']}")
+                            
+                            # Show availability status
+                            scrim_id = scrim['ID']
+                            availability_data = df_availability[df_availability['ScrimID'] == scrim_id] if not df_availability.empty else pd.DataFrame()
+                            
+                            if not availability_data.empty:
+                                available_count = len(availability_data[availability_data['Available'] == 'Yes'])
+                                total_responses = len(availability_data)
+                                st.markdown(f"**Availability:** {available_count}/{total_responses} players available")
+                            else:
+                                st.markdown("**Availability:** No responses yet")
+                        
+                        with col2:
+                            st.info("Login as a player to mark your availability")
+    
+    with tab2:
+        # Only coaches can create scrims
+        if user_role != 'coach':
+            st.warning("Only coaches can create scrims.")
+        else:
+            st.markdown("### ➕ Create New Scrim")
+            
+            with st.form("create_scrim"):
+                title = st.text_input("Scrim Title", placeholder="e.g., Weekly Scrim vs Team X")
+                date = st.date_input("Date", min_value=datetime.today().date())
+                time = st.time_input("Time")
+                map_name = st.selectbox("Map", [
+                    "Ascent", "Bind", "Breeze", "Fracture", "Haven", "Lotus", "Pearl", "Split", "Sunset", "Abyss"
+                ], placeholder="Select a map...")
+                description = st.text_area("Description", placeholder="Additional details about the scrim...")
+                
+                submitted = st.form_submit_button("Create Scrim")
+                
+                if submitted:
+                    if not title:
+                        st.error("Please enter a scrim title.")
+                    else:
+                        # Create new scrim
+                        scrim_id = str(uuid.uuid4())[:8]
+                        new_scrim = {
+                            'ID': scrim_id,
+                            'Title': title,
+                            'Date': date.strftime("%Y-%m-%d"),
+                            'Time': time.strftime("%H:%M"),
+                            'Map': map_name,
+                            'Description': description,
+                            'CreatedBy': current_user,
+                            'CreatedAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                        
+                        # Save to CSV
+                        updated = pd.concat([df_scrims, pd.DataFrame([new_scrim])], ignore_index=True)
+                        save_scrims(updated)
+                        st.success(f"Scrim '{title}' created successfully!")
+                        st.rerun()
 
 # ==============================================================================
 # 2. MATCH ENTRY (AUTO PLAYER STATS)
