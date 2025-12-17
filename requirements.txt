@@ -6,5 +6,4 @@ numpy
 Pillow
 streamlit-drawable-canvas
 watchdog
-streamlit-gsheets
 st-gsheets-connection
