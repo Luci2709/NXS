@@ -5,6 +5,8 @@ import json
 import os
 import glob
 import requests
+import textwrap
+from streamlit_gsheets import GSheetsConnection
 import uuid
 import base64
 import calendar
@@ -22,6 +24,9 @@ import streamlit.elements.image as st_image
 import io
 import base64
 from PIL import Image
+
+# Verbindung zum Google Sheet herstellen
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 def custom_image_to_url(image, width=None, clamp=False, channels="RGB", output_format="JPEG", image_id=None, allow_emoji=False):
     """
@@ -47,7 +52,7 @@ def custom_image_to_url(image, width=None, clamp=False, channels="RGB", output_f
     # Als Data-URL zurückgeben
     return f"data:{mime};base64,{b64_encoded}"
 
-# ⬇️ HIER WAR DER FEHLER: Das '#' am Anfang dieser Zeile muss weg!
+# Patch anwenden
 st_image.image_to_url = custom_image_to_url
 
 # ⚠️ JETZT ERST DIE CANVAS LIBRARY IMPORTIEREN
@@ -126,8 +131,7 @@ def login_page():
                         st.session_state.role = role
                         st.session_state.allowed_pages = get_allowed_pages(role)
                         st.success(f"Welcome {username}! Redirecting...")
-                        # Remove st.rerun() to avoid potential issues
-                        # st.rerun()
+                        st.rerun()
                     else:
                         st.error("Invalid username or password.")
 
@@ -142,8 +146,7 @@ def logout():
     for key in ['authenticated', 'username', 'role', 'allowed_pages']:
         if key in st.session_state:
             del st.session_state[key]
-    # Remove st.rerun() to avoid potential issues
-    # st.rerun()
+    st.rerun()
 
 # ==============================================================================
 st.set_page_config(page_title="NXS Dashboard", layout="wide", page_icon="💠")
@@ -271,27 +274,241 @@ st.markdown("""
         color: white !important;
         font-weight: bold !important;
     }
+          /* --- VALORANT STYLE MATCH CARD (FINAL) --- */
+    .val-card {
+        background-color: #121212; /* Noch dunklerer Hintergrund */
+        border-radius: 4px;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        height: 90px; /* Etwas höher für mehr Platz */
+        overflow: hidden;
+        transition: transform 0.2s, background-color 0.2s;
+        border: 1px solid #222;
+        position: relative; /* Wichtig für die absolute Positionierung der Map */
+    }
+    .val-card:hover {
+        transform: translateX(4px);
+        background-color: #1e1e1e;
+    }
+    /* Der farbige Streifen links */
+    .val-bar {
+        width: 5px;
+        height: 100%;
+        position: absolute;
+        left: 0;
+        top: 0;
+        z-index: 2;
+    }
+    /* Map Hintergrundbild mit dunklem Verlauf */
+    .val-map-bg {
+        position: absolute;
+        left: 5px; /* Startet direkt nach dem Streifen */
+        top: 0;
+        width: 220px; /* Breite des Map-Abschnitts */
+        height: 100%;
+        background-size: cover;
+        background-position: center;
+        /* Ein dunkler Verlauf macht den Text darauf lesbar */
+        background: linear-gradient(to right, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 100%);
+        z-index: 0;
+    }
+    /* Map Name und Datum */
+    .val-info {
+        position: absolute;
+        left: 25px;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 1;
+    }
+    .val-map-name {
+        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-weight: 900;
+        font-size: 1.5em;
+        color: white;
+        text-transform: uppercase;
+        line-height: 1;
+        text-shadow: 1px 1px 5px rgba(0,0,0,0.8); /* Schatten für bessere Lesbarkeit */
+    }
+    .val-date {
+        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-size: 0.85em;
+        color: #ccc;
+        margin-top: 5px;
+        font-weight: 500;
+        text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+    }
+    /* Container für BEIDE Teams in der Mitte */
+    .val-agents-container {
+        flex-grow: 1;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 20px; /* Abstand zwischen den Teams */
+        margin-left: 230px; /* Versatz, damit sie nicht über der Map liegen */
+        z-index: 1;
+    }
+    .val-agents-team {
+        display: flex;
+        gap: 4px; /* Abstand zwischen den Agenten eines Teams */
+    }
+    .val-agent-img {
+        width: 38px;
+        height: 38px;
+        border-radius: 4px;
+        border: 1px solid #333;
+        background: #000;
+        transition: transform 0.1s;
+    }
+    .val-agent-img:hover {
+        transform: scale(1.1);
+        z-index: 2;
+    }
+    /* Score Bereich rechts */
+    .val-score-box {
+        width: 150px;
+        text-align: right;
+        padding-right: 30px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: flex-end;
+        z-index: 1;
+    }
+    .val-score {
+        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-weight: 900;
+        font-size: 2.2em; /* Größerer Score */
+        line-height: 1;
+        text-shadow: 0 0 10px rgba(0,0,0,0.5);
+    }
+    /* "WATCH" Link darunter */
+    .val-vod-link {
+        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-size: 0.75em;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-top: 4px;
+        text-decoration: none;
+        opacity: 0.8;
+        transition: opacity 0.2s;
+    }
+    .val-vod-link:hover {
+        opacity: 1;
+        text-decoration: underline;
+    }
+/* --- POWER RANKING CARD DESIGN (FIXED & COMPACT) --- */
+    .rank-row {
+        background-color: #121212;
+        border: 1px solid #222;
+        border-radius: 4px;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        padding: 4px 8px;         /* Etwas mehr seitliches Padding */
+        height: 54px;             /* Kompakte Höhe */
+        transition: transform 0.2s, background-color 0.2s;
+        overflow: hidden;
+    }
+    .rank-row:hover {
+        background-color: #1a1a1a;
+        transform: translateX(4px);
+        border-color: #333;
+    }
+    
+    /* Map Bild */
+    .rank-img-box {
+        width: 120px;
+        height: 100%;
+        border-radius: 3px;
+        overflow: hidden;
+        margin-right: 12px;
+        flex-shrink: 0;
+    }
+    .rank-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    
+    /* Map Name - Schriftgröße angepasst */
+    .rank-name {
+        width: 80px;
+        font-family: 'Segoe UI', sans-serif;
+        font-weight: 800;
+        font-size: 14px;          /* Fest auf 14px gesetzt */
+        color: white;
+        text-transform: uppercase;
+        margin-right: 10px;
+        flex-shrink: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Stats Container */
+    .rank-stats {
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 4px;                 /* Kleiner Abstand zwischen den Balken */
+    }
+    
+    /* Einzelne Zeile (Label - Balken - Zahl) */
+    .stat-line {
+        display: flex;
+        align-items: center;
+        height: 18px;             /* Fixe Höhe pro Zeile */
+    }
+    
+    /* Label (RATING / WIN%) */
+    .stat-label {
+        width: 50px;              /* Etwas breiter damit nichts umbricht */
+        color: #666;
+        font-weight: 700;
+        font-size: 10px;          /* Sehr klein und fein */
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    /* Balken Hintergrund */
+    .prog-bg {
+        flex-grow: 1;
+        height: 6px;              /* Dünner Balken */
+        background-color: #252525;
+        border-radius: 3px;
+        margin: 0 10px;
+        overflow: hidden;
+    }
+    
+    /* Balken Füllung */
+    .prog-fill {
+        height: 100%;
+        border-radius: 3px;
+    }
+    
+    /* Die Zahl am Ende (WICHTIG!) */
+    .stat-val {
+        width: 45px;              /* Verbreitert! Vorher 30px -> zu eng */
+        text-align: right;
+        font-weight: 800;
+        font-family: 'Consolas', 'Monaco', monospace; /* Monospace für saubere Ausrichtung */
+        font-size: 12px;          /* Gut lesbare Größe */
+        line-height: 1;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # --- PFADE ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR_JSON = os.path.join(BASE_DIR, "data", "matches")
-DATA_FILE_CSV = os.path.join(BASE_DIR, "data", "nexus_matches.csv")
-PLAYER_STATS_CSV = os.path.join(BASE_DIR, "data", "nexus_player_performances.csv")
-PLAYBOOKS_FILE = os.path.join(BASE_DIR, "data", "playbooks.csv") # Legacy
-RESOURCES_FILE = os.path.join(BASE_DIR, "data", "resources.csv")
-CALENDAR_FILE = os.path.join(BASE_DIR, "data", "calendar.csv")
-TEAM_PLAYBOOKS_FILE = os.path.join(BASE_DIR, "data", "nexus_playbooks.csv")
-PB_STRATS_FILE = os.path.join(BASE_DIR, "data", "nexus_pb_strats.csv")
-MAP_THEORY_FILE = os.path.join(BASE_DIR, "data", "nexus_map_theory.csv")
-TODO_FILE = os.path.join(BASE_DIR, "data", "todo.csv")
-SCRIMS_FILE = os.path.join(BASE_DIR, "data", "scrims.csv")
-SCRIM_AVAILABILITY_FILE = os.path.join(BASE_DIR, "data", "scrim_availability.csv")
-PLAYER_TODOS_FILE = os.path.join(BASE_DIR, "data", "player_todos.csv")
-PLAYER_MESSAGES_FILE = os.path.join(BASE_DIR, "data", "player_messages.csv")
+# Die Pfade zu lokalen CSVs werden hier eigentlich nicht mehr gebraucht, außer als Referenz oder für Heatmap JSONs
 ASSET_DIR = os.path.join(BASE_DIR, "assets")
 STRAT_IMG_DIR = os.path.join(ASSET_DIR, "strats")
+PLAYBOOKS_FILE = os.path.join(BASE_DIR, "data", "playbooks.csv")
+TEAM_PLAYBOOKS_FILE = os.path.join(BASE_DIR, "data", "nexus_playbooks.csv")
 
 # Verzeichnisse erstellen
 for d in [DATA_DIR_JSON, os.path.join(BASE_DIR, "data"), STRAT_IMG_DIR, os.path.join(ASSET_DIR, "maps"), os.path.join(ASSET_DIR, "agents")]:
@@ -344,26 +561,87 @@ def load_csv_generic(filepath, cols):
     if os.path.exists(filepath): return pd.read_csv(filepath)
     return pd.DataFrame(columns=cols)
 
-def update_availability(scrim_id, player, status):
-    """Update or create availability entry for a player"""
-    # Load existing availability data
+# --- SPEICHER FUNKTIONEN (GOOGLE SHEETS) ---
+# WICHTIG: Diese Funktionen müssen VOR der UI definiert sein
+
+def save_matches(df_new):
     try:
-        df_avail = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='utf-8')
-    except (UnicodeDecodeError, FileNotFoundError):
-        try:
-            df_avail = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='utf-16')
-        except (UnicodeDecodeError, FileNotFoundError):
-            df_avail = pd.DataFrame(columns=['ScrimID', 'Player', 'Available', 'UpdatedAt'])
+        conn.update(worksheet="nexus_matches", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def save_player_stats(df_new):
+    try:
+        conn.update(worksheet="Premier - PlayerStats", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def save_scrims(df_new):
+    try:
+        conn.update(worksheet="scrims", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def save_scrim_availability(df_new):
+    try:
+        conn.update(worksheet="scrim_availability", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def save_player_todos(df_new):
+    try:
+        conn.update(worksheet="player_todos", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def save_player_messages(df_new):
+    try:
+        conn.update(worksheet="player_messages", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def save_team_playbooks(df_new):
+    try:
+        conn.update(worksheet="nexus_playbooks", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def save_legacy_playbooks(df_new):
+    try:
+        conn.update(worksheet="playbooks", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def save_pb_strats(df_new):
+    try:
+        conn.update(worksheet="nexus_pb_strats", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def save_map_theory(df_new):
+    try:
+        conn.update(worksheet="nexus_map_theory", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def save_resources(df_new):
+    try:
+        conn.update(worksheet="resources", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def save_calendar(df_new):
+    try:
+        conn.update(worksheet="calendar", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def save_simple_todos(df_new):
+    try:
+        conn.update(worksheet="todo", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def update_availability(scrim_id, player, status):
+    """Update or create availability entry for a player (GSheet Version)"""
+    try:
+        df_avail = conn.read(worksheet="scrim_availability", ttl=0)
+    except:
+        df_avail = pd.DataFrame(columns=['ScrimID', 'Player', 'Available', 'UpdatedAt'])
     
-    # Check if entry already exists
     mask = (df_avail['ScrimID'] == scrim_id) & (df_avail['Player'] == player)
     
     if mask.any():
-        # Update existing entry
         df_avail.loc[mask, 'Available'] = status
         df_avail.loc[mask, 'UpdatedAt'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     else:
-        # Create new entry
         new_entry = {
             'ScrimID': scrim_id,
             'Player': player,
@@ -372,129 +650,102 @@ def update_availability(scrim_id, player, status):
         }
         df_avail = pd.concat([df_avail, pd.DataFrame([new_entry])], ignore_index=True)
     
-    # Save back to CSV with UTF-8 encoding using cached function
     save_scrim_availability(df_avail)
 
 def delete_scrim(scrim_id):
-    """Delete a scrim and all its availability data"""
-    # Delete scrim from scrims file
+    """Delete a scrim and all its availability data (GSheet Version)"""
     try:
-        df_scrims = pd.read_csv(SCRIMS_FILE, encoding='utf-8')
-    except (UnicodeDecodeError, FileNotFoundError):
-        try:
-            df_scrims = pd.read_csv(SCRIMS_FILE, encoding='utf-16')
-        except (UnicodeDecodeError, FileNotFoundError):
-            df_scrims = pd.DataFrame(columns=['ID', 'Title', 'Date', 'Time', 'Map', 'Description', 'CreatedBy', 'CreatedAt'])
-    
-    # Remove the scrim
-    save_scrims(df_scrims)
-    
-    # Delete all availability data for this scrim
-    try:
-        df_avail = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='utf-8')
-    except (UnicodeDecodeError, FileNotFoundError):
-        try:
-            df_avail = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='utf-16')
-        except (UnicodeDecodeError, FileNotFoundError):
-            df_avail = pd.DataFrame(columns=['ScrimID', 'Player', 'Available', 'UpdatedAt'])
-    
-    # Remove availability data for this scrim
-    save_scrim_availability(df_avail)
+        df_scrims = conn.read(worksheet="scrims", ttl=0)
+        df_scrims = df_scrims[df_scrims['ID'] != scrim_id]
+        save_scrims(df_scrims)
+        
+        # Delete availability
+        df_avail = conn.read(worksheet="scrim_availability", ttl=0)
+        df_avail = df_avail[df_avail['ScrimID'] != scrim_id]
+        save_scrim_availability(df_avail)
+    except Exception as e:
+        st.error(f"Error deleting scrim: {e}")
 
-# --- DATA LOADER ---
-@st.cache_data
+# ==============================================================================
+# 💾 GOOGLE SHEETS DATA LOADER (MIT RATE LIMIT SCHUTZ)
+# ==============================================================================
+
+@st.cache_data(ttl=3600) 
 def load_data(dummy=None):
-    # Matches
-    df = pd.read_csv(DATA_FILE_CSV) if os.path.exists(DATA_FILE_CSV) else pd.DataFrame()
-    if not df.empty:
+    # Hilfsfunktion mit Retry-Logik (Wartet bei Fehler 429)
+    def get_sheet(worksheet_name, cols=None):
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Versuche zu lesen
+                return conn.read(worksheet=worksheet_name, ttl=0).dropna(how="all")
+            except Exception as e:
+                # Prüfen ob es ein Rate Limit Fehler ist (Code 429)
+                if "429" in str(e) or "Quota exceeded" in str(e):
+                    wait_time = (attempt + 1) * 2  # Warte 2s, dann 4s, dann 6s
+                    print(f"⚠️ Google API Rate Limit bei '{worksheet_name}'. Warte {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    # Bei anderen Fehlern (z.B. Blatt existiert nicht) -> Leeres DF
+                    return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
+        
+        # Wenn es nach 3 Versuchen nicht klappt -> Leeres DF zurückgeben
+        return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
+
+    # --- DATEN LADEN (Mit kleiner Pause zwischen schweren Blöcken) ---
+    
+    # Block 1: Wichtige Match Daten
+    df = get_sheet("nexus_matches", ['Date', 'Map', 'Result', 'Score_Us', 'Score_Enemy'])
+    if not df.empty and 'Date' in df.columns:
+        df['DateObj'] = pd.to_datetime(df['Date'], format="%d.%m.%Y", errors='coerce')
         for c in ['Score_Us', 'Score_Enemy', 'Atk_R_W', 'Def_R_W', 'Atk_R_L', 'Def_R_L']:
             if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
         df['Delta'] = df['Score_Us'] - df['Score_Enemy']
-        df['DateObj'] = pd.to_datetime(df['Date'], format="%d.%m.%Y", errors='coerce')
     
-    # Player Stats
-    df_p = pd.read_csv(PLAYER_STATS_CSV) if os.path.exists(PLAYER_STATS_CSV) else pd.DataFrame()
-    
-    # Scrims
-    try:
-        df_scrims = pd.read_csv(SCRIMS_FILE, encoding='utf-8')
-    except (UnicodeDecodeError, FileNotFoundError):
-        try:
-            df_scrims = pd.read_csv(SCRIMS_FILE, encoding='utf-16')
-        except (UnicodeDecodeError, FileNotFoundError):
-            try:
-                df_scrims = pd.read_csv(SCRIMS_FILE, encoding='latin-1')
-            except (UnicodeDecodeError, FileNotFoundError):
-                df_scrims = pd.DataFrame(columns=['ID', 'Title', 'Date', 'Time', 'Map', 'Description', 'CreatedBy', 'CreatedAt'])
-    
+    # Kleine Pause um API zu schonen
+    time.sleep(0.5)
+
+    # Block 2: Statistiken & Scrims
+    df_p = get_sheet("Premier - PlayerStats")
+    df_scrims = get_sheet("scrims", ['ID', 'Title', 'Date', 'Time', 'Map', 'Description', 'CreatedBy', 'CreatedAt'])
     if not df_scrims.empty:
         df_scrims['DateTimeObj'] = pd.to_datetime(df_scrims['Date'] + ' ' + df_scrims['Time'], format="%Y-%m-%d %H:%M", errors='coerce')
     
-    # Scrim Availability
-    try:
-        df_availability = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='utf-8')
-    except (UnicodeDecodeError, FileNotFoundError):
-        try:
-            df_availability = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='utf-16')
-        except (UnicodeDecodeError, FileNotFoundError):
-            try:
-                df_availability = pd.read_csv(SCRIM_AVAILABILITY_FILE, encoding='latin-1')
-            except (UnicodeDecodeError, FileNotFoundError):
-                df_availability = pd.DataFrame(columns=['ScrimID', 'Player', 'Available', 'UpdatedAt'])
-    
-    # Player Todos
-    try:
-        df_todos = pd.read_csv(PLAYER_TODOS_FILE, encoding='utf-8')
-    except (UnicodeDecodeError, FileNotFoundError):
-        try:
-            df_todos = pd.read_csv(PLAYER_TODOS_FILE, encoding='utf-16')
-        except (UnicodeDecodeError, FileNotFoundError):
-            try:
-                df_todos = pd.read_csv(PLAYER_TODOS_FILE, encoding='latin-1')
-            except (UnicodeDecodeError, FileNotFoundError):
-                df_todos = pd.DataFrame(columns=['ID', 'Player', 'Title', 'Description', 'PlaybookLink', 'YoutubeLink', 'AssignedBy', 'AssignedAt', 'Completed', 'CompletedAt'])
-    
-    if not df_todos.empty:
-        df_todos['Completed'] = df_todos['Completed'].map({'True': True, 'False': False})
-    
-    # Player Messages
-    try:
-        df_messages = pd.read_csv(PLAYER_MESSAGES_FILE, encoding='utf-8')
-    except (UnicodeDecodeError, FileNotFoundError):
-        try:
-            df_messages = pd.read_csv(PLAYER_MESSAGES_FILE, encoding='utf-16')
-        except (UnicodeDecodeError, FileNotFoundError):
-            try:
-                df_messages = pd.read_csv(PLAYER_MESSAGES_FILE, encoding='latin-1')
-            except (UnicodeDecodeError, FileNotFoundError):
-                df_messages = pd.DataFrame(columns=['ID', 'FromUser', 'ToUser', 'Message', 'SentAt', 'Read'])
-    
-    if not df_messages.empty:
-        df_messages['Read'] = df_messages['Read'].map({'True': True, 'False': False})
-    
-    return df, df_p, df_scrims, df_availability, df_todos, df_messages
+    df_availability = get_sheet("scrim_availability", ['ScrimID', 'Player', 'Available', 'UpdatedAt'])
 
-# Data saving functions that clear cache
-def save_scrim_availability(df_availability):
-    """Save scrim availability and clear cache"""
-    df_availability.to_csv(SCRIM_AVAILABILITY_FILE, index=False, encoding='utf-8')
-    load_data.clear()
+    # Kleine Pause
+    time.sleep(0.5)
 
-def save_player_todos(df_todos):
-    """Save player todos"""
-    df_todos.to_csv(PLAYER_TODOS_FILE, index=False, encoding='utf-8')
+    # Block 3: Player Management
+    df_todos = get_sheet("player_todos", ['ID', 'Player', 'Title', 'Description', 'PlaybookLink', 'YoutubeLink', 'AssignedBy', 'AssignedAt', 'Completed', 'CompletedAt'])
+    if not df_todos.empty and 'Completed' in df_todos.columns:
+        df_todos['Completed'] = df_todos['Completed'].astype(str).str.lower() == 'true'
 
-def save_player_messages(df_messages):
-    """Save player messages"""
-    df_messages.to_csv(PLAYER_MESSAGES_FILE, index=False, encoding='utf-8')
+    df_messages = get_sheet("player_messages", ['ID', 'FromUser', 'ToUser', 'Message', 'SentAt', 'Read'])
+    if not df_messages.empty and 'Read' in df_messages.columns:
+        df_messages['Read'] = df_messages['Read'].astype(str).str.lower() == 'true'
 
-def save_scrims(df_scrims):
-    """Save scrims and clear cache"""
-    df_scrims.to_csv(SCRIMS_FILE, index=False, encoding='utf-8')
-    load_data.clear()
+    # Block 4: Playbooks & Content
+    df_team_pb = get_sheet("nexus_playbooks", ['ID', 'Map', 'Name', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
+    df_legacy_pb = get_sheet("playbooks", ['Map', 'Name', 'Link', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
+    df_pb_strats = get_sheet("nexus_pb_strats", ['PB_ID', 'Strat_ID', 'Name', 'Image', 'Protocols'])
+    df_theory = get_sheet("nexus_map_theory", ['Map', 'Section', 'Content', 'Image'])
+    
+    # Block 5: Misc
+    df_res = get_sheet("resources", ['Title', 'Link', 'Category', 'Note'])
+    df_cal = get_sheet("calendar", ['Date', 'Time', 'Event', 'Map', 'Type'])
+    df_simple_todos = get_sheet("todo", ['Task', 'Done'])
+    if not df_simple_todos.empty and 'Done' in df_simple_todos.columns:
+        df_simple_todos['Done'] = df_simple_todos['Done'].astype(str).str.lower() == 'true'
 
-# --- UI START ---
-df, df_players, df_scrims, df_availability, df_todos, df_messages = load_data(time.time())
+    return df, df_p, df_scrims, df_availability, df_todos, df_messages, df_team_pb, df_legacy_pb, df_pb_strats, df_theory, df_res, df_cal, df_simple_todos
+
+# ==============================================================================
+# 🚀 APP START & DATEN LADEN
+# ==============================================================================
+
+# HIER WERDEN DIE DATEN GELADEN UND DIE VARIABLEN GLOBAL GESETZT
+df, df_players, df_scrims, df_availability, df_todos, df_messages, df_team_pb, df_legacy_pb, df_pb_strats, df_theory, df_res, df_cal, df_simple_todos = load_data()
 
 # Handle navigation triggers
 if "trigger_navigation" in st.session_state:
@@ -505,15 +756,24 @@ with st.sidebar:
     if os.path.exists("logo.png"): st.image("logo.png", width=140)
     st.title("NEXUS")
     
-    # Filter navigation based on user role
+    # --- NAVIGATION LOGIK ---
     all_pages = ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "📝 MATCH ENTRY", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "💾 DATABASE"]
+    
+    # Hole die erlaubten Seiten aus dem Session State (gesetzt beim Login)
+    # Fallback auf alle Seiten, falls Session State leer ist
     allowed_pages = st.session_state.get('allowed_pages', all_pages)
     
+    # Navigation erstellen
     page = st.radio("NAVIGATION", allowed_pages, label_visibility="collapsed", key="navigation_radio")
-    st.markdown("---")
-    if st.button("🔄 RELOAD DATA"): st.rerun()
     
-    # Add logout button
+    st.markdown("---")
+    
+    # --- RELOAD BUTTON (MIT CACHE CLEAR) ---
+    if st.button("🔄 RELOAD DATA"): 
+        st.cache_data.clear()
+        st.rerun()
+    
+    # --- USER INFO & LOGOUT ---
     st.markdown("---")
     col1, col2 = st.columns(2)
     with col1:
@@ -556,7 +816,7 @@ if page == "🏠 DASHBOARD":
     
     st.title("PERFORMANCE DASHBOARD")
     
-    # Button logic for notifications (Falls gewünscht, hier bereinigt)
+    # Button logic for notifications
     if (incomplete_todos > 0 or unread_messages > 0) and user_role == 'player':
         st.markdown("---")
         col1, col2, col3 = st.columns([1, 2, 1])
@@ -569,7 +829,7 @@ if page == "🏠 DASHBOARD":
             elif unread_messages > 0:
                 notification_text = f"🔔 You have {unread_messages} unread message(s)!"
             
-            if st.button(notification_text, type="primary", use_container_width=True):
+            if st.button(notification_text, type="primary", width='stretch'):
                 st.session_state["navigation_radio"] = "👥 COACHING"
                 st.rerun()
         st.markdown("---")
@@ -606,87 +866,170 @@ if page == "🏠 DASHBOARD":
             st.markdown(html+"</div>", unsafe_allow_html=True)
             
             # --- TABLE ---
-            st.divider(); st.markdown("### 🏆 POWER RANKING")
+            # --- POWER RANKING (CUSTOM UI) ---
+            st.divider()
+            st.markdown("### 🏆 POWER RANKING")
+            
+            # Daten vorbereiten (wie vorher)
             rank_df = pd.DataFrame(conf_list).rename(columns={'M':'Map','S':'Score','WR':'Winrate'})
+            
             if not rank_df.empty:
-                rank_df['MapImg'] = rank_df['Map'].apply(lambda x: f"data:image/png;base64,{img_to_b64(get_map_img(x, 'list'))}")
-                st.dataframe(rank_df[['MapImg','Map','Score','Winrate']], column_config={"MapImg":st.column_config.ImageColumn("Map",width="small"), "Score":st.column_config.ProgressColumn("Rating",format="%.1f",min_value=0,max_value=max(rank_df['Score'])+10), "Winrate":st.column_config.ProgressColumn("Win%",format="%.0f%%",min_value=0,max_value=100)}, use_container_width=True, hide_index=True)
+                # Max Score finden für die Berechnung der Balkenlänge (100% Breite)
+                max_score = rank_df['Score'].max() if rank_df['Score'].max() > 0 else 1
+                
+                # Header (Optional, aber schön für Übersicht)
+                # st.caption("MAP PERFORMANCE BREAKDOWN")
+
+                for idx, row in rank_df.iterrows():
+                    # 1. Daten holen
+                    map_name = row['Map']
+                    score = row['Score']
+                    winrate = row['Winrate']
+                    
+                    # 2. Bild holen (als Base64)
+                    # Wir nutzen hier 'list' (breit) oder 'icon' (quadratisch) - was du lieber magst
+                    img_path = get_map_img(map_name, 'list') 
+                    b64_img = img_to_b64(img_path)
+                    img_html = f"<img src='data:image/png;base64,{b64_img}' class='rank-img'>" if b64_img else ""
+                    
+                    # 3. Balkenbreiten berechnen (in %)
+                    # Score relativ zum besten Score
+                    score_width = min(int((score / max_score) * 100), 100)
+                    # Winrate ist einfach der Prozentwert
+                    winrate_width = int(winrate)
+                    
+                    # 4. Farben für Balken definieren
+                    # Score: Cyan (#00BFFF)
+                    # Winrate: Pink (#FF1493) oder dynamisch (Grün/Rot)
+                    wr_color = "#00ff80" if winrate >= 50 else "#ff4655" # Grün wenn >50%, sonst Rot
+                    
+                    # 5. HTML zusammenbauen
+                    html_rank = f"""
+                    <div class="rank-row">
+                        <div class="rank-img-box">
+                            {img_html}
+                        </div>
+                        
+                        <div class="rank-name">{map_name}</div>
+                        
+                        <div class="rank-stats">
+                            <div class="stat-line">
+                                <div class="stat-label">RATING</div>
+                                <div class="prog-bg">
+                                    <div class="prog-fill" style="width: {score_width}%; background-color: #00BFFF; box-shadow: 0 0 10px rgba(0, 191, 255, 0.4);"></div>
+                                </div>
+                                <div class="stat-val" style="color: #00BFFF;">{score:.1f}</div>
+                            </div>
+                            
+                            <div class="stat-line">
+                                <div class="stat-label">WIN %</div>
+                                <div class="prog-bg">
+                                    <div class="prog-fill" style="width: {winrate_width}%; background-color: {wr_color};"></div>
+                                </div>
+                                <div class="stat-val" style="color: {wr_color};">{winrate:.0f}%</div>
+                            </div>
+                        </div>
+                    </div>
+                    """
+                    
+                    # Rendern ohne Zeilenumbrüche
+                    st.markdown(html_rank.replace("\n", " "), unsafe_allow_html=True)
+
+            else:
+                st.info("Noch keine Daten für das Ranking verfügbar.")
             
             # --- RECENT ---
-            st.divider(); st.markdown("### RECENT ACTIVITY")
-            limit = st.slider("Matches:", 3, 20, 5)
-            for idx, row in df_filt.sort_values('DateObj', ascending=False).head(limit).iterrows():
-                res=row['Result']; b="#00ff80" if res=='W' else "#ff1493" if res=='L' else "#ffeb3b";
-                with st.container():
-                    st.markdown(f"<div class='rec-card' style='border-left-color:{b}'>", unsafe_allow_html=True)
-                    c1,c2,c3,c4 = st.columns([1.2,1.5,4,1.5])
-                    with c1: 
-                        img=get_map_img(row['Map'], 'list'); 
-                        if img: st.image(img, use_container_width=True)
-                    with c2: st.markdown(f"**{row['Map']}**"); st.caption(f"{row['Date']}")
-                    with c3:
-                        # Display comps
-                        mh=""; eh=""
-                        for i in range(1,6):
-                            if pd.notna(row.get(f'MyComp_{i}')): 
-                                b64=img_to_b64(get_agent_img(row[f'MyComp_{i}'])); 
-                                if b64: mh+=f"<img src='data:image/png;base64,{b64}' width='25' style='margin-right:3px'>"
-                            if pd.notna(row.get(f'EnComp_{i}')): 
-                                b64=img_to_b64(get_agent_img(row[f'EnComp_{i}'])); 
-                                if b64: eh+=f"<img src='data:image/png;base64,{b64}' width='25' style='margin-right:3px'>"
-                        if mh: st.markdown(f"<div class='comp-box-my'>{mh}</div>", unsafe_allow_html=True)
-                        if eh: st.markdown(f"<div class='comp-box-en'>{eh}</div>", unsafe_allow_html=True)
-                        
-                        # Individual stat boxes
-                        stat_boxes = []
-                        
-                        # W/L box
-                        wl_color = "#00ff80" if res == 'W' else "#ff1493"
-                        bg_color = "#002200" if res == 'W' else "#220000"
-                        stat_boxes.append(f"<div style='background-color: {bg_color}; color: {wl_color}; padding: 2px 6px; border-radius: 3px; display: inline-block; margin: 1px; font-size: 0.7em; font-weight: bold;'>{res}</div>")
-                        
-                        # +/- box
-                        delta = int(row['Score_Us']) - int(row['Score_Enemy'])
-                        delta_color = "#00ff80" if delta > 0 else "#ff1493" if delta < 0 else "#ffeb3b"
-                        bg_color = "#002200" if delta > 0 else "#220000" if delta < 0 else "#222200"
-                        stat_boxes.append(f"<div style='background-color: {bg_color}; color: {delta_color}; padding: 2px 6px; border-radius: 3px; display: inline-block; margin: 1px; font-size: 0.7em; font-weight: bold;'>{delta:+d}</div>")
-                        
-                        # Round stats if available
-                        if pd.notna(row.get('Atk_R_W')) and pd.notna(row.get('Def_R_W')):
-                            atk_rw = int(row['Atk_R_W'])
-                            def_rw = int(row['Def_R_W'])
-                            total_rw = atk_rw + def_rw
-                            rw_color = "#00ff80" if total_rw >= 6 else "#ffeb3b" if total_rw >= 3 else "#ff1493"
-                            bg_color = "#002200" if total_rw >= 6 else "#222200" if total_rw >= 3 else "#220000"
-                            stat_boxes.append(f"<div style='background-color: {bg_color}; color: {rw_color}; padding: 2px 6px; border-radius: 3px; display: inline-block; margin: 1px; font-size: 0.7em; font-weight: bold;'>RW:{total_rw}</div>")
-                        
-                        if pd.notna(row.get('Atk_R_L')) and pd.notna(row.get('Def_R_L')):
-                            atk_rl = int(row['Atk_R_L'])
-                            def_rl = int(row['Def_R_L'])
-                            total_rl = atk_rl + def_rl
-                            rl_color = "#ff1493" if total_rl >= 6 else "#ffeb3b" if total_rl >= 3 else "#00ff80"
-                            bg_color = "#220000" if total_rl >= 6 else "#222200" if total_rl >= 3 else "#002200"
-                            stat_boxes.append(f"<div style='background-color: {bg_color}; color: {rl_color}; padding: 2px 6px; border-radius: 3px; display: inline-block; margin: 1px; font-size: 0.7em; font-weight: bold;'>RL:{total_rl}</div>")
-                        
-                        # Attack/Defense stats if available
-                        if pd.notna(row.get('Atk_R_W')) and pd.notna(row.get('Atk_R_L')):
-                            atk_total = int(row['Atk_R_W']) + int(row['Atk_R_L'])
-                            atk_color = "#00ff80" if atk_total >= 6 else "#ffeb3b" if atk_total >= 3 else "#ff1493"
-                            bg_color = "#002200" if atk_total >= 6 else "#222200" if atk_total >= 3 else "#220000"
-                            stat_boxes.append(f"<div style='background-color: {bg_color}; color: {atk_color}; padding: 2px 6px; border-radius: 3px; display: inline-block; margin: 1px; font-size: 0.7em; font-weight: bold;'>A:{atk_total}</div>")
-                        
-                        if pd.notna(row.get('Def_R_W')) and pd.notna(row.get('Def_R_L')):
-                            def_total = int(row['Def_R_W']) + int(row['Def_R_L'])
-                            def_color = "#00ff80" if def_total >= 6 else "#ffeb3b" if def_total >= 3 else "#ff1493"
-                            bg_color = "#002200" if def_total >= 6 else "#222200" if def_total >= 3 else "#220000"
-                            stat_boxes.append(f"<div style='background-color: {bg_color}; color: {def_color}; padding: 2px 6px; border-radius: 3px; display: inline-block; margin: 1px; font-size: 0.7em; font-weight: bold;'>D:{def_total}</div>")
-                        
-                        # Display all stat boxes
-                        if stat_boxes:
-                            stats_html = "<div style='margin-top: 5px;'>" + "".join(stat_boxes) + "</div>"
-                            st.markdown(stats_html, unsafe_allow_html=True)
-                    with c4: st.markdown(f"<h3 style='color:{b}; margin:0; text-align:right'>{int(row['Score_Us'])}:{int(row['Score_Enemy'])}</h3>", unsafe_allow_html=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
+       # --- RECENT ACTIVITY (VALORANT STYLE - FINAL) ---
+            st.divider()
+            st.markdown("### RECENT ACTIVITY")
+            
+            limit = st.slider("Matches anzeigen:", 3, 20, 5, label_visibility="collapsed")
+            matches_to_show = df_filt.sort_values('DateObj', ascending=False).head(limit)
+
+            for idx, row in matches_to_show.iterrows():
+                # 1. FARBEN UND LOGIK DEFINIEREN
+                res = row['Result']
+                score_us = int(row['Score_Us'])
+                score_en = int(row['Score_Enemy'])
+                
+                # Original Valorant Farben (Helles Grün / Rot-Pink)
+                if res == 'W':
+                    bar_color = "#00ff80" 
+                    score_color = "#00ff80" 
+                    vod_text = "WATCH"
+                elif res == 'L':
+                    bar_color = "#ff4655" 
+                    score_color = "#ff4655"
+                    vod_text = "WATCH" # Wie im Beispielbild (oder einfach "WATCH")
+                else:
+                    bar_color = "#aaaaaa"
+                    score_color = "#ffffff"
+                    vod_text = "WATCH"
+
+                # 2. MAP HINTERGRUNDBILD HOLEN
+                # Wir nutzen das 'list' Bild (breites Banner)
+                map_img_path = get_map_img(row['Map'], 'list')
+                b64_map = img_to_b64(map_img_path)
+                # CSS für das Hintergrundbild mit einem dunklen Verlauf darüber
+                if b64_map:
+                    map_bg_style = f"background-image: linear-gradient(to right, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 100%), url('data:image/png;base64,{b64_map}');"
+                else:
+                    map_bg_style = "background-color: #222;" # Fallback
+
+                # 3. HELFER-FUNKTION FÜR AGENTEN-ICONS (BEIDE TEAMS)
+                def get_agents_html(comp_prefix):
+                    html = ""
+                    for i in range(1, 6):
+                        agent_name = row.get(f'{comp_prefix}_{i}')
+                        if pd.notna(agent_name) and str(agent_name) != "":
+                            b64_img = img_to_b64(get_agent_img(agent_name))
+                            if b64_img:
+                                # Mit 'title' Attribut für Mouseover-Namen
+                                html += f"<img src='data:image/png;base64,{b64_img}' class='val-agent-img' title='{agent_name}'>"
+                            else:
+                                html += f"<div class='val-agent-img' style='background:#333' title='Unknown'></div>"
+                    return html
+
+                # HTML für beide Teams generieren
+                my_agents_html = get_agents_html('MyComp')
+                en_agents_html = get_agents_html('EnComp')
+                
+                # 4. VOD LINK GENERIEREN
+                vod_link = row.get('VOD_Link')
+                # Prüfen, ob ein gültiger Link existiert
+                if pd.notna(vod_link) and str(vod_link).startswith("http"):
+                    vod_html = f'<a href="{vod_link}" target="_blank" class="val-vod-link" style="color: {score_color};">{vod_text}</a>'
+                else:
+                    # Inaktiver Text, wenn kein Link da ist
+                    vod_html = f'<span class="val-vod-link" style="color: {score_color}; opacity: 0.5;">{vod_text}</span>'
+
+                # 5. DAS FINALE HTML ZUSAMMENBAUEN
+                html_card = f"""
+                <div class="val-card">
+                    <div class="val-bar" style="background-color: {bar_color};"></div>
+                    
+                    <div class="val-map-bg" style="{map_bg_style}"></div>
+                    
+                    <div class="val-info">
+                        <div class="val-map-name">{row['Map']}</div>
+                        <div class="val-date">{row['Date']}</div>
+                    </div>
+                    
+                    <div class="val-agents-container">
+                        <div class="val-agents-team">{my_agents_html}</div>
+                        <div style="color:#666; font-weight:bold; font-size:0.8em;">VS</div>
+                        <div class="val-agents-team">{en_agents_html}</div>
+                    </div>
+                    
+                    <div class="val-score-box">
+                        <div class="val-score" style="color: {score_color};">{score_us} : {score_en}</div>
+                        {vod_html}
+                    </div>
+                </div>
+                """
+                
+                # WICHTIG: .replace("\n", " ") entfernt Umbrüche für Streamlit
+                st.markdown(html_card.replace("\n", " "), unsafe_allow_html=True)
 
 # ==============================================================================
 # 👥 COACHING
@@ -703,11 +1046,11 @@ elif page == "👥 COACHING":
         st.markdown("---")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🔄 Switch to Coach View", type="primary", use_container_width=True):
+            if st.button("🔄 Switch to Coach View", type="primary", width='stretch'):
                 st.session_state.testing_context = 'coach'
                 st.rerun()
         with col2:
-            if st.button("🔄 Switch to Player View", type="secondary", use_container_width=True):
+            if st.button("🔄 Switch to Player View", type="secondary", width='stretch'):
                 st.session_state.testing_context = 'player'
                 st.rerun()
         
@@ -724,24 +1067,13 @@ elif page == "👥 COACHING":
         with tab1:
             st.markdown("### 📝 Assign Tasks to Players")
             
-            # Load playbooks for linking
-            try:
-                df_legacy_pb = pd.read_csv(PLAYBOOKS_FILE, encoding='utf-8')
-            except:
-                df_legacy_pb = pd.DataFrame()
-            
-            try:
-                df_team_pb = pd.read_csv(TEAM_PLAYBOOKS_FILE, encoding='utf-8')
-            except:
-                df_team_pb = pd.DataFrame()
-            
             with st.form("assign_todo"):
                 col1, col2 = st.columns(2)
                 
                 with col1:
                     player = st.selectbox("Select Player", 
-                                        ["player1", "player2", "player3", "player4", "player5"],
-                                        format_func=lambda x: f"🎮 {x}")
+                                            ["player1", "player2", "player3", "player4", "player5"],
+                                            format_func=lambda x: f"🎮 {x}")
                     title = st.text_input("Task Title", placeholder="e.g., Review Ascent Defense")
                 
                 with col2:
@@ -755,14 +1087,14 @@ elif page == "👥 COACHING":
                         all_playbooks.extend(team_pbs)
                     
                     playbook_link = st.selectbox("Link Playbook (optional)", 
-                                               ["None"] + all_playbooks,
-                                               help="Select a playbook to link to this task")
+                                                ["None"] + all_playbooks,
+                                                help="Select a playbook to link to this task")
                     
                     youtube_link = st.text_input("YouTube Link (optional)", 
-                                               placeholder="https://youtube.com/watch?v=...")
+                                                placeholder="https://youtube.com/watch?v=...")
                 
                 description = st.text_area("Task Description", 
-                                         placeholder="Detailed instructions for the player...")
+                                            placeholder="Detailed instructions for the player...")
                 
                 submitted = st.form_submit_button("📤 Assign Task")
                 
@@ -778,16 +1110,10 @@ elif page == "👥 COACHING":
                         if playbook_link != "None":
                             if playbook_link.startswith("Legacy: "):
                                 pb_name = playbook_link.replace("Legacy: ", "")
-                                if not df_legacy_pb.empty:
-                                    matching_pb = df_legacy_pb[df_legacy_pb['Name'] == pb_name]
-                                    if not matching_pb.empty:
-                                        final_pb_link = f"Legacy Playbook: {pb_name}"
+                                final_pb_link = f"Legacy Playbook: {pb_name}"
                             elif playbook_link.startswith("Team: "):
                                 pb_name = playbook_link.replace("Team: ", "")
-                                if not df_team_pb.empty:
-                                    matching_pb = df_team_pb[df_team_pb['Name'] == pb_name]
-                                    if not matching_pb.empty:
-                                        final_pb_link = f"Team Playbook: {pb_name}"
+                                final_pb_link = f"Team Playbook: {pb_name}"
                         
                         new_todo = {
                             'ID': todo_id,
@@ -802,7 +1128,7 @@ elif page == "👥 COACHING":
                             'CompletedAt': ""
                         }
                         
-                        # Save to CSV using cached function
+                        # Save to GSheets
                         updated_todos = pd.concat([df_todos, pd.DataFrame([new_todo])], ignore_index=True)
                         save_player_todos(updated_todos)
                         
@@ -814,9 +1140,9 @@ elif page == "👥 COACHING":
             
             # Select player to chat with
             chat_player = st.selectbox("Chat with", 
-                                     ["player1", "player2", "player3", "player4", "player5"],
-                                     format_func=lambda x: f"🎮 {x}",
-                                     key="chat_player_select")
+                                    ["player1", "player2", "player3", "player4", "player5"],
+                                    format_func=lambda x: f"🎮 {x}",
+                                    key="chat_player_select")
             
             if chat_player:
                 st.markdown(f"### 💬 Chat with {chat_player}")
@@ -863,15 +1189,13 @@ elif page == "👥 COACHING":
                 
                 with st.form(key=f"chat_form_{chat_player}"):
                     message = st.text_input("Type your message...", 
-                                          value=st.session_state[message_key], 
-                                          key=message_key)
+                                            value=st.session_state[message_key], 
+                                            key=message_key)
                     submitted = st.form_submit_button("📤 Send")
                     
                     if submitted and message.strip():
-                        # Mark as just submitted to clear input on next run
                         st.session_state['just_submitted'] = True
                         
-                        # Create message
                         message_id = str(uuid.uuid4())[:8]
                         
                         new_message = {
@@ -883,7 +1207,6 @@ elif page == "👥 COACHING":
                             'Read': False
                         }
                         
-                        # Save to CSV using cached function
                         updated_messages = pd.concat([df_messages, pd.DataFrame([new_message])], ignore_index=True)
                         save_player_messages(updated_messages)
                         
@@ -1038,9 +1361,9 @@ elif page == "👥 COACHING":
             else:
                 # Select coach to chat with
                 selected_coach = st.selectbox("Chat with", 
-                                            coach_conversations,
-                                            format_func=lambda x: f"👨‍🏫 {x}",
-                                            key="player_chat_select")
+                                                coach_conversations,
+                                                format_func=lambda x: f"👨‍🏫 {x}",
+                                                key="player_chat_select")
                 
                 if selected_coach:
                     st.markdown(f"### 💬 Chat with {selected_coach}")
@@ -1204,7 +1527,7 @@ elif page == "⚽ SCRIMS":
                                 del_col1, del_col2 = st.columns(2)
                                 with del_col1:
                                     if st.button("🗑️ Delete", key=f"delete_{scrim_id}", 
-                                               help="Delete this scrim"):
+                                                help="Delete this scrim"):
                                         delete_scrim(scrim_id)
                                         st.rerun()
                                 with del_col2:
@@ -1396,13 +1719,17 @@ elif page == "📝 MATCH ENTRY":
             if d['hm']: pd.DataFrame(d['hm']).to_csv(os.path.join(BASE_DIR,"data",f"Locs_{mi}.csv"),index=False)
             row={'Date':dt.strftime("%d.%m.%Y"),'Map':mp,'Result':re,'Score_Us':us,'Score_Enemy':en,'MatchID':mi,'Source':'Tracker' if d['hm'] else 'Manual','VOD_Link':vo,'Atk_R_W':aw,'Atk_R_L':al,'Def_R_W':dw,'Def_R_L':dl}
             for i in range(5): row[f'MyComp_{i+1}']=my_final[i]; row[f'EnComp_{i+1}']=en_f[i] if i<len(en_f) else ""
-            old=pd.read_csv(DATA_FILE_CSV) if os.path.exists(DATA_FILE_CSV) else pd.DataFrame()
-            pd.concat([old,pd.DataFrame([row])],ignore_index=True).to_csv(DATA_FILE_CSV,index=False)
             
-            # Save Player Stats
+            # Save Matches to GSheets
+            old = df # Loaded from GSheets
+            updated_matches = pd.concat([old,pd.DataFrame([row])],ignore_index=True)
+            save_matches(updated_matches)
+            
+            # Save Player Stats to GSheets
             if d['p_stats']:
-                ps_old = pd.read_csv(PLAYER_STATS_CSV) if os.path.exists(PLAYER_STATS_CSV) else pd.DataFrame()
-                pd.concat([ps_old, pd.DataFrame(d['p_stats'])], ignore_index=True).to_csv(PLAYER_STATS_CSV, index=False)
+                ps_old = df_players # Loaded from GSheets
+                updated_stats = pd.concat([ps_old, pd.DataFrame(d['p_stats'])], ignore_index=True)
+                save_player_stats(updated_stats)
                 
             st.success("Saved!"); st.cache_data.clear(); st.rerun()
 
@@ -1415,7 +1742,7 @@ elif page == "🗺️ MAP ANALYZER":
         sel_map = st.selectbox("MAP:", sorted(df['Map'].unique()))
         m_df = df[df['Map'] == sel_map]
         head = get_map_img(sel_map, 'list'); 
-        if head: st.image(head, use_container_width=True)
+        if head: st.image(head, width='stretch')
         
         wins = len(m_df[m_df['Result']=='W']); g = len(m_df)
         aw = m_df['Atk_R_W'].sum(); al = m_df['Atk_R_L'].sum()
@@ -1524,11 +1851,8 @@ elif page == "📘 STRATEGY BOARD":
     
     if 'sel_pb_id' not in st.session_state: st.session_state['sel_pb_id'] = None
 
-    # Load Data
-    df_pb = load_csv_generic(TEAM_PLAYBOOKS_FILE, ['ID', 'Map', 'Name', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
-    df_pb_strats = load_csv_generic(PB_STRATS_FILE, ['PB_ID', 'Strat_ID', 'Name', 'Image', 'Protocols'])
-    df_theory = load_csv_generic(MAP_THEORY_FILE, ['Map', 'Section', 'Content', 'Image']) 
-
+    # Load Data (Variables are already loaded globally: df_team_pb, df_pb_strats, df_theory)
+    
     # TABS (INTEGRATION OF WHITEBOARD)
     tab_playbooks, tab_whiteboard, tab_theory, tab_links = st.tabs(["🧠 TACTICAL PLAYBOOKS", "🎨 TACTICAL BOARD", "📜 MAP THEORY", "🔗 EXTERNAL LINKS"])
 
@@ -1553,11 +1877,13 @@ elif page == "📘 STRATEGY BOARD":
                             new_id = str(uuid.uuid4())
                             new_row = {'ID': new_id, 'Map': pm, 'Name': pn}
                             for i in range(5): new_row[f'Agent_{i+1}'] = sel_ags[i]
-                            pd.concat([df_pb, pd.DataFrame([new_row])], ignore_index=True).to_csv(TEAM_PLAYBOOKS_FILE, index=False)
+                            
+                            updated = pd.concat([df_team_pb, pd.DataFrame([new_row])], ignore_index=True)
+                            save_team_playbooks(updated)
                             st.rerun()
 
-            if not df_pb.empty:
-                for idx, row in df_pb.iterrows():
+            if not df_team_pb.empty:
+                for idx, row in df_team_pb.iterrows():
                     map_img = get_map_img(row['Map'], 'list')
                     b64_map = img_to_b64(map_img)
                     ag_html = ""
@@ -1575,11 +1901,11 @@ elif page == "📘 STRATEGY BOARD":
 
         else:
             # Single Playbook
-            pb = df_pb[df_pb['ID'] == st.session_state['sel_pb_id']].iloc[0]
+            pb = df_team_pb[df_team_pb['ID'] == st.session_state['sel_pb_id']].iloc[0]
             st.button("⬅ BACK TO LOBBY", on_click=lambda: st.session_state.update({'sel_pb_id': None}))
             
             header_col1, header_col2 = st.columns([1, 4])
-            with header_col1: st.image(get_map_img(pb['Map'], 'list'), use_container_width=True)
+            with header_col1: st.image(get_map_img(pb['Map'], 'list'), width='stretch')
             with header_col2:
                 st.markdown(f"<h1 style='margin:0'>{pb['Name']} <span style='font-size:0.5em; color:#666'>//{pb['Map']}</span></h1>", unsafe_allow_html=True)
                 cols = st.columns(10)
@@ -1598,7 +1924,10 @@ elif page == "📘 STRATEGY BOARD":
                             fname = f"PB_{pb['ID'][:8]}_{sn}_{int(datetime.now().timestamp())}.png".replace(" ", "_")
                             with open(os.path.join(STRAT_IMG_DIR, fname), "wb") as f: f.write(si.getbuffer())
                             new_strat = {'PB_ID': pb['ID'], 'Strat_ID': str(uuid.uuid4()), 'Name': sn, 'Image': fname, 'Protocols': '[]'}
-                            pd.concat([df_pb, pd.DataFrame([new_strat])], ignore_index=True).to_csv(PB_STRATS_FILE, index=False); st.rerun()
+                            
+                            updated = pd.concat([df_pb_strats, pd.DataFrame([new_strat])], ignore_index=True)
+                            save_pb_strats(updated)
+                            st.rerun()
 
             if not my_strats.empty:
                 for idx, strat in my_strats.iterrows():
@@ -1607,7 +1936,7 @@ elif page == "📘 STRATEGY BOARD":
                         with c_img:
                             st.subheader(f"📍 {strat['Name']}")
                             spath = os.path.join(STRAT_IMG_DIR, strat['Image'])
-                            if os.path.exists(spath): st.image(spath, use_container_width=True)
+                            if os.path.exists(spath): st.image(spath, width='stretch')
                         with c_proto:
                             st.markdown("### ⚡ PROTOCOLS")
                             try: protos = json.loads(strat['Protocols'])
@@ -1622,10 +1951,12 @@ elif page == "📘 STRATEGY BOARD":
                                     if st.form_submit_button("Add"):
                                         protos.append({'trigger': trig, 'reaction': react})
                                         df_pb_strats.loc[df_pb_strats['Strat_ID'] == strat['Strat_ID'], 'Protocols'] = json.dumps(protos)
-                                        df_pb_strats.to_csv(PB_STRATS_FILE, index=False); st.rerun()
+                                        save_pb_strats(df_pb_strats)
+                                        st.rerun()
                                 if st.button("Clear Protocols", key=f"clr_{strat['Strat_ID']}"):
                                     df_pb_strats.loc[df_pb_strats['Strat_ID'] == strat['Strat_ID'], 'Protocols'] = '[]'
-                                    df_pb_strats.to_csv(PB_STRATS_FILE, index=False); st.rerun()
+                                    save_pb_strats(df_pb_strats)
+                                    st.rerun()
                         st.divider()
 
     # --------------------------------------------------------------------------
@@ -1689,7 +2020,7 @@ elif page == "📘 STRATEGY BOARD":
         st.markdown("#### 4. SPEICHERN")
         strat_name = st.text_input("Name der Taktik", placeholder="z.B. B Rush Pistol")
         
-        map_pbs = df_pb[df_pb['Map'] == wb_map]
+        map_pbs = df_team_pb[df_team_pb['Map'] == wb_map]
         assign_pb = st.selectbox("Zu Playbook hinzufügen:", ["Keins"] + list(map_pbs['Name'].unique()) if not map_pbs.empty else ["Keins"])
 
         # Persist canvas drawing across tool changes
@@ -1738,7 +2069,7 @@ elif page == "📘 STRATEGY BOARD":
             # Update session state with current drawing
             st.session_state.canvas_drawing = canvas_result.json_data if canvas_result.json_data else {}
             
-            if st.button("💾 SAVE STRATEGY", type="primary", use_container_width=True):
+            if st.button("💾 SAVE STRATEGY", type="primary", width='stretch'):
                 if canvas_result.image_data is not None and strat_name:
                     img_data = canvas_result.image_data.astype("uint8")
                     im = Image.fromarray(img_data)
@@ -1762,7 +2093,7 @@ elif page == "📘 STRATEGY BOARD":
                     im.save(os.path.join(STRAT_IMG_DIR, fname))
                     
                     if assign_pb != "Keins":
-                        pb_id = df_pb[df_pb['Name']==assign_pb].iloc[0]['ID']
+                        pb_id = df_team_pb[df_team_pb['Name']==assign_pb].iloc[0]['ID']
                         new_entry = {
                             'PB_ID': pb_id, 
                             'Strat_ID': str(uuid.uuid4()), 
@@ -1770,7 +2101,8 @@ elif page == "📘 STRATEGY BOARD":
                             'Image': fname, 
                             'Protocols': '[]'
                         }
-                        pd.concat([df_pb_strats, pd.DataFrame([new_entry])], ignore_index=True).to_csv(PB_STRATS_FILE, index=False)
+                        updated = pd.concat([df_pb_strats, pd.DataFrame([new_entry])], ignore_index=True)
+                        save_pb_strats(updated)
                         st.success(f"Gespeichert in Playbook: {assign_pb}")
                     else:
                         st.success(f"Bild gespeichert als {fname}")
@@ -1793,14 +2125,19 @@ elif page == "📘 STRATEGY BOARD":
             if not row.empty: return row.iloc[0]['Content'], row.iloc[0]['Image']
             return "", None
 
-        def save_theory_data(m, s, text, new_img_obj, old_img_name):
+        def save_theory_data_gsheet(m, s, text, new_img_obj, old_img_name):
             img_name = old_img_name
             if new_img_obj:
                 img_name = f"THEORY_{m}_{s}_{int(datetime.now().timestamp())}.png".replace(" ", "_")
                 with open(os.path.join(STRAT_IMG_DIR, img_name), "wb") as f: f.write(new_img_obj.getbuffer())
+            
+            # Remove old entry for this section
             new_df = df_theory[~((df_theory['Map'] == m) & (df_theory['Section'] == s))]
+            # Add new entry
             new_entry = pd.DataFrame([{'Map': m, 'Section': s, 'Content': text, 'Image': img_name}])
-            pd.concat([new_df, new_entry], ignore_index=True).to_csv(MAP_THEORY_FILE, index=False)
+            updated = pd.concat([new_df, new_entry], ignore_index=True)
+            
+            save_map_theory(updated)
             return img_name
 
         t_gen, t_atk, t_def = st.tabs(["🌐 GENERAL", "⚔️ ATTACK", "🛡️ DEFENSE"])
@@ -1814,17 +2151,20 @@ elif page == "📘 STRATEGY BOARD":
                 with c_upl:
                     if curr_img:
                         p = os.path.join(STRAT_IMG_DIR, curr_img)
-                        if os.path.exists(p): st.image(p, caption="Current Reference", use_container_width=True)
+                        if os.path.exists(p): st.image(p, caption="Current Reference", width='stretch')
                     new_img = st.file_uploader(f"Upload {sec_name} Image", type=['png', 'jpg'], key=f"up_{theory_map}_{sec_name}")
                 if st.button(f"Save {sec_name}", key=f"sv_{theory_map}_{sec_name}"):
-                    save_theory_data(theory_map, sec_name, new_txt, new_img, curr_img)
+                    save_theory_data_gsheet(theory_map, sec_name, new_txt, new_img, curr_img)
                     st.success("Saved"); st.rerun()
 
     # --------------------------------------------------------------------------
     # TAB 4: EXTERNAL LINKS
     # --------------------------------------------------------------------------
     with tab_links:
-        pb_df = load_csv_generic(PLAYBOOKS_FILE, ['Map', 'Name', 'Link', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
+        # Use Legacy Playbooks for external links if that's the intent or df_legacy_pb
+        # Based on previous code, pb_df seemed to load PLAYBOOKS_FILE which is now df_legacy_pb
+        pb_df = df_legacy_pb 
+        
         with st.expander("➕ New External Link"):
             with st.form("pb_link"):
                 c1, c2 = st.columns(2)
@@ -1836,7 +2176,9 @@ elif page == "📘 STRATEGY BOARD":
                 if st.form_submit_button("Save"): 
                     nr = {'Map': pm, 'Name': pn, 'Link': pl}
                     for i in range(5): nr[f'Agent_{i+1}'] = mas[i]
-                    pd.concat([pb_df, pd.DataFrame([nr])], ignore_index=True).to_csv(PLAYBOOKS_FILE, index=False)
+                    
+                    updated = pd.concat([pb_df, pd.DataFrame([nr])], ignore_index=True)
+                    save_legacy_playbooks(updated)
                     st.rerun()
 
         if not pb_df.empty:
@@ -1862,16 +2204,19 @@ elif page == "📘 STRATEGY BOARD":
 # ==============================================================================
 elif page == "📚 RESOURCES":
     st.title("KNOWLEDGE BASE")
-    res_df = load_csv_generic(RESOURCES_FILE, ['Title', 'Link', 'Category', 'Note'])
+    # df_res loaded globally
+    
     with st.expander("➕ Add"):
         with st.form("ra"):
             rt = st.text_input("Title"); rl = st.text_input("Link"); rc = st.selectbox("Cat", ["Theory", "Lineups", "Setup", "Playbook Theory"]); rn = st.text_area("Note")
             if st.form_submit_button("Save"):
-                pd.concat([res_df, pd.DataFrame([{'Title': rt, 'Link': rl, 'Category': rc, 'Note': rn}])], ignore_index=True).to_csv(RESOURCES_FILE, index=False); st.rerun()
+                updated = pd.concat([df_res, pd.DataFrame([{'Title': rt, 'Link': rl, 'Category': rc, 'Note': rn}])], ignore_index=True)
+                save_resources(updated)
+                st.rerun()
     
-    if not res_df.empty:
-        cats = st.multiselect("Filter:", res_df['Category'].unique(), default=res_df['Category'].unique())
-        view = res_df[res_df['Category'].isin(cats)]
+    if not df_res.empty:
+        cats = st.multiselect("Filter:", df_res['Category'].unique(), default=df_res['Category'].unique())
+        view = df_res[df_res['Category'].isin(cats)]
         cols = st.columns(4)
         for i, (idx, row) in enumerate(view.iterrows()):
             with cols[i%4]:
@@ -1880,8 +2225,10 @@ elif page == "📚 RESOURCES":
                 st.markdown(f"""<div class="res-tile">{img}<div class="res-info"><div style="color:#00BFFF; font-size:0.8em">{row['Category']}</div><div style="font-weight:bold">{row['Title']}</div><a href="{row['Link']}" target="_blank" style="color:#aaa; font-size:0.8em">OPEN</a></div></div>""", unsafe_allow_html=True)
     
     with st.expander("✏️ Edit"):
-        ed = st.data_editor(res_df, num_rows="dynamic")
-        if st.button("Save Changes"): ed.to_csv(RESOURCES_FILE, index=False); st.rerun()
+        ed = st.data_editor(df_res, num_rows="dynamic")
+        if st.button("Save Changes"): 
+            save_resources(ed)
+            st.success("Saved"); st.rerun()
 
 # ==============================================================================
 # 6. CALENDAR
@@ -1892,9 +2239,7 @@ elif page == "📅 CALENDAR":
     if 'cm' not in st.session_state: st.session_state['cm'] = datetime.now().month
     
     c1, c2 = st.columns([2, 1])
-    cal_df = load_csv_generic(CALENDAR_FILE, ['Date', 'Time', 'Event', 'Map', 'Type'])
-    todo_df = load_csv_generic(TODO_FILE, ['Task', 'Done'])
-    if 'Done' not in todo_df.columns: todo_df['Done'] = False
+    # df_cal and df_simple_todos loaded globally
     
     with c1:
         cp, cc, cn = st.columns([1,2,1])
@@ -1916,7 +2261,7 @@ elif page == "📅 CALENDAR":
                 with cols[i]:
                     if d!=0:
                         d_s = f"{d:02d}.{curr.month:02d}.{curr.year}"
-                        evs = cal_df[cal_df['Date']==d_s]
+                        evs = df_cal[df_cal['Date']==d_s]
                         bg = "#1a1a40; border:1px solid #00BFFF" if date(curr.year, curr.month, d)==date.today() else "#222"
                         h = f"<div class='cal-day-box' style='background:{bg}'><b>{d}</b>"
                         for _, e in evs.iterrows():
@@ -1928,17 +2273,23 @@ elif page == "📅 CALENDAR":
             with st.form("ca"):
                 cd=st.date_input("D"); ct=st.time_input("T"); ce=st.text_input("E"); cm=st.text_input("M"); cty=st.selectbox("T",["Match","Scrim","Other"])
                 if st.form_submit_button("Add"):
-                    pd.concat([cal_df, pd.DataFrame([{'Date':cd.strftime("%d.%m.%Y"),'Time':ct.strftime("%H:%M"),'Event':ce,'Map':cm,'Type':cty}])], ignore_index=True).to_csv(CALENDAR_FILE, index=False); st.rerun()
+                    updated = pd.concat([df_cal, pd.DataFrame([{'Date':cd.strftime("%d.%m.%Y"),'Time':ct.strftime("%H:%M"),'Event':ce,'Map':cm,'Type':cty}])], ignore_index=True)
+                    save_calendar(updated)
+                    st.rerun()
 
     with c2:
         st.subheader("TODO")
         with st.form("td"):
             t = st.text_input("Task")
             if st.form_submit_button("Add"):
-                pd.concat([todo_df, pd.DataFrame([{'Task':t, 'Done':False}])], ignore_index=True).to_csv(TODO_FILE, index=False); st.rerun()
-        if not todo_df.empty:
-            ed = st.data_editor(todo_df, num_rows="dynamic")
-            if st.button("Save Todo"): ed.to_csv(TODO_FILE, index=False); st.success("Saved")
+                updated = pd.concat([df_simple_todos, pd.DataFrame([{'Task':t, 'Done':False}])], ignore_index=True)
+                save_simple_todos(updated)
+                st.rerun()
+        if not df_simple_todos.empty:
+            ed = st.data_editor(df_simple_todos, num_rows="dynamic")
+            if st.button("Save Todo"): 
+                save_simple_todos(ed)
+                st.success("Saved")
 
 # ==============================================================================
 # 7. PLAYERS
@@ -1953,7 +2304,7 @@ elif page == "📊 PLAYERS":
         }).reset_index()
         p_agg['SafeDeaths'] = p_agg['Deaths'].replace(0, 1)
         p_agg['KD'] = p_agg['Kills'] / p_agg['SafeDeaths']
-        p_agg['ACS'] = p_agg['Score'] / p_agg['Roundss']
+        p_agg['ACS'] = p_agg['Score'] / p_agg['Rounds']
         p_agg = p_agg.rename(columns={'MatchID': 'Matches'})
         
         st.dataframe(
@@ -1963,7 +2314,7 @@ elif page == "📊 PLAYERS":
                 "ACS": st.column_config.NumberColumn("ACS", format="%.0f"),
                 "HS": st.column_config.NumberColumn("HS%", format="%.1f%%")
             },
-            use_container_width=True, hide_index=True
+            width='stretch', hide_index=True
         )
         st.caption("Stats based on imported JSONs.")
     else: st.info("No player stats yet. Import JSON matches to see data.")
@@ -1972,5 +2323,8 @@ elif page == "📊 PLAYERS":
 # 8. DATABASE
 # ==============================================================================
 elif page == "💾 DATABASE":
-    st.header("Database"); ed = st.data_editor(df, num_rows="dynamic")
-    if st.button("Save"): ed.to_csv(DATA_FILE_CSV, index=False); st.success("Saved")
+    st.header("Database")
+    ed = st.data_editor(df, num_rows="dynamic")
+    if st.button("Save"): 
+        save_matches(ed)
+        st.success("Saved to Google Sheets")
