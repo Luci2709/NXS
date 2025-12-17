@@ -1,0 +1,21 @@
+# --- Streamlit Secrets (WICHTIG!) ---
+.streamlit/secrets.toml
+**/secrets.toml
+
+# --- Python Systemdateien ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Virtuelle Umgebungen (falls vorhanden) ---
+.venv/
+env/
+venv/
+ENV/
+
+# --- VS Code Einstellungen (optional, aber gut) ---
+.vscode/
+
+# --- Betriebssystem Müll ---
+.DS_Store
+Thumbs.db
