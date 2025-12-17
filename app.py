@@ -670,7 +670,7 @@ def delete_scrim(scrim_id):
 # 💾 GOOGLE SHEETS DATA LOADER (MIT RATE LIMIT SCHUTZ)
 # ==============================================================================
 
-@st.cache_data(ttl=3600) 
+@st.cache_data(ttl=3600)
 def load_data(dummy=None):
     # Hilfsfunktion mit Retry-Logik (Wartet bei Fehler 429)
     def get_sheet(worksheet_name, cols=None):
@@ -686,7 +686,16 @@ def load_data(dummy=None):
                     print(f"⚠️ Google API Rate Limit bei '{worksheet_name}'. Warte {wait_time}s...")
                     time.sleep(wait_time)
                 else:
-                    # Bei anderen Fehlern (z.B. Blatt existiert nicht) -> Leeres DF
+                    # Bei anderen Fehlern, versuche lokale CSV zu laden
+                    local_path = os.path.join(BASE_DIR, "data", f"{worksheet_name}.csv")
+                    if os.path.exists(local_path):
+                        try:
+                            df_local = pd.read_csv(local_path, encoding='utf-8')
+                            print(f"⚠️ Loaded {worksheet_name} from local CSV.")
+                            return df_local.dropna(how="all")
+                        except Exception as e2:
+                            print(f"⚠️ Failed to load local CSV for {worksheet_name}: {e2}")
+                    # Wenn alles fehlschlägt -> Leeres DF
                     return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
         
         # Wenn es nach 3 Versuchen nicht klappt -> Leeres DF zurückgeben
