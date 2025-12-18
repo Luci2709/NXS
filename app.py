@@ -70,11 +70,12 @@ USER_CREDENTIALS = {
 
     # Players - all except database and match entry
     "Luggi": {"password": "1", "role": "player"},
-    "player2": {"password": "player123", "role": "player"},
-    "player3": {"password": "player123", "role": "player"},
-    "player4": {"password": "player123", "role": "player"},
-    "player5": {"password": "player123", "role": "player"},
-
+    "Andrei": {"password": "player123", "role": "player"},
+    "Benni": {"password": "player123", "role": "player"},
+    "Sofi": {"password": "player123", "role": "player"},
+    "Luca": {"password": "player123", "role": "player"},
+    "Remus": {"password": "player123", "role": "player"},
+    
     # Coaches - full access
     "coach1": {"password": "coach123", "role": "coach"},
     "coach2": {"password": "coach123", "role": "coach"},
@@ -135,11 +136,7 @@ def login_page():
                     else:
                         st.error("Invalid username or password.")
 
-        st.markdown("---")
-        st.markdown("### Demo Accounts")
-        st.markdown("**Visitors:** visitor1/visitor2 (password: visitor123)")
-        st.markdown("**Players:** player1/player2/player3/player4/player5 (password: player123)")
-        st.markdown("**Coaches:** coach1/coach2 (password: coach123)")
+      
 
 def logout():
     """Logout user"""
@@ -514,7 +511,7 @@ TEAM_PLAYBOOKS_FILE = os.path.join(BASE_DIR, "data", "nexus_playbooks.csv")
 for d in [DATA_DIR_JSON, os.path.join(BASE_DIR, "data"), STRAT_IMG_DIR, os.path.join(ASSET_DIR, "maps"), os.path.join(ASSET_DIR, "agents")]:
     if not os.path.exists(d): os.makedirs(d)
 
-OUR_TEAM = ["Trashies", "Luggi", "Umbra", "Noctis", "n0thing", "Gengar", "Tejo", "Kawii", "Saizsu"]
+OUR_TEAM = ["Trashies", "Luggi", "Umbra", "Noctis", "n0thing", "Gengar"]
 
 # --- HELPER ---
 def get_map_img(map_name, type='list'):
@@ -778,7 +775,7 @@ with st.sidebar:
     st.markdown("---")
     
     # --- RELOAD BUTTON (MIT CACHE CLEAR) ---
-    if st.button("🔄 RELOAD DATA"): 
+    if st.button("🔄 Reload Data (if you created/deleted something)"): 
         st.cache_data.clear()
         st.rerun()
     
@@ -788,7 +785,7 @@ with st.sidebar:
     with col1:
         st.markdown(f"**User:** {st.session_state.get('username', 'Unknown')}")
     with col2:
-        if st.button("🚪 LOGOUT"):
+        if st.button("🚪 Logout"):
             logout()
 
 # ==============================================================================
@@ -838,7 +835,7 @@ if page == "🏠 DASHBOARD":
             elif unread_messages > 0:
                 notification_text = f"🔔 You have {unread_messages} unread message(s)!"
             
-            if st.button(notification_text, type="primary", width='stretch'):
+            if st.button(notification_text, type="primary"):
                 st.session_state["navigation_radio"] = "👥 COACHING"
                 st.rerun()
         st.markdown("---")
@@ -1055,11 +1052,11 @@ elif page == "👥 COACHING":
         st.markdown("---")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🔄 Switch to Coach View", type="primary", width='stretch'):
+            if st.button("🔄 Switch to Coach View", type="primary"):
                 st.session_state.testing_context = 'coach'
                 st.rerun()
         with col2:
-            if st.button("🔄 Switch to Player View", type="secondary", width='stretch'):
+            if st.button("🔄 Switch to Player View", type="secondary"):
                 st.session_state.testing_context = 'player'
                 st.rerun()
         
@@ -1081,7 +1078,7 @@ elif page == "👥 COACHING":
                 
                 with col1:
                     player = st.selectbox("Select Player", 
-                                            ["player1", "player2", "player3", "player4", "player5"],
+                                            ["Luggi","Benni","Andrei","Luca","Sofi","Remus"],
                                             format_func=lambda x: f"🎮 {x}")
                     title = st.text_input("Task Title", placeholder="e.g., Review Ascent Defense")
                 
@@ -1149,7 +1146,7 @@ elif page == "👥 COACHING":
             
             # Select player to chat with
             chat_player = st.selectbox("Chat with", 
-                                    ["player1", "player2", "player3", "player4", "player5"],
+                                     ["Luggi","Benni","Andrei","Luca","Sofi","Remus"],
                                     format_func=lambda x: f"🎮 {x}",
                                     key="chat_player_select")
             
@@ -1225,7 +1222,7 @@ elif page == "👥 COACHING":
         with tab3:
             st.markdown("### 📊 Player Overview")
             
-            players = ["player1", "player2", "player3", "player4", "player5"]
+            players =  ["Luggi","Benni","Andrei","Luca","Sofi","Remus"],
             
             for player in players:
                 with st.expander(f"🎮 {player}", expanded=False):
@@ -1902,7 +1899,7 @@ elif page == "📘 STRATEGY BOARD":
                             ab64 = img_to_b64(get_agent_img(a))
                             if ab64: ag_html += f"<img src='data:image/png;base64,{ab64}' style='width:35px; height:35px; border-radius:50%; border:2px solid #111; margin-right:-10px; z-index:{i}'>"
                     
-                    st.markdown(f"""<div class='pb-card'><div style="display:flex;align-items:center;gap:20px;"><div style="width:80px;height:50px;border-radius:5px;background-image:url('data:image/png;base64,{b64_map}');background-size:cover;border:1px solid #444;"></div><div><div style="color:#00BFFF;font-weight:bold;font-size:1.1em;text-transform:uppercase;">{row['Name']}</div><div style="color:#666;font-size:0.8em;">{row['Map']}</div></div><div style="margin-left:auto;padding-right:10px;">{ag_html}</div></div></div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class='pb-card'><div style="display:flex;align-items:center;gap:20px;"><div style="width:80px;height:50px;border-radius:5px;background-image:url('data:image/png;base64,{b64_map}');background-size:contain;background-position:center;border:1px solid #444;"></div><div><div style="color:#00BFFF;font-weight:bold;font-size:1.1em;text-transform:uppercase;">{row['Name']}</div><div style="color:#666;font-size:0.8em;">{row['Map']}</div></div><div style="margin-left:auto;padding-right:10px;">{ag_html}</div></div></div>""", unsafe_allow_html=True)
                     if st.button(f"OPEN TACTICS >>", key=f"btn_{row['ID']}"):
                         st.session_state['sel_pb_id'] = row['ID']; st.rerun()
             else:
@@ -2078,7 +2075,7 @@ elif page == "📘 STRATEGY BOARD":
             # Update session state with current drawing
             st.session_state.canvas_drawing = canvas_result.json_data if canvas_result.json_data else {}
             
-            if st.button("💾 SAVE STRATEGY", type="primary", width='stretch'):
+            if st.button("💾 SAVE STRATEGY", type="primary"):
                 if canvas_result.image_data is not None and strat_name:
                     img_data = canvas_result.image_data.astype("uint8")
                     im = Image.fromarray(img_data)
@@ -2194,19 +2191,17 @@ elif page == "📘 STRATEGY BOARD":
             f_pb = st.selectbox("Links Map:", ["All"]+sorted(pb_df['Map'].unique()), key="fl_map")
             v_pb = pb_df if f_pb == "All" else pb_df[pb_df['Map'] == f_pb]
             for idx, row in v_pb.iterrows():
-                ags_html = ""
-                for i in range(1,6):
-                    ag = row.get(f'Agent_{i}')
-                    if pd.notna(ag) and ag:
-                        b64 = img_to_b64(get_agent_img(ag))
-                        ags_html += f'<img src="data:image/png;base64,{b64}" style="width:30px; margin-right:3px;">'
-                st.markdown(f"""
-                <div class='pb-card' style='border-left: 4px solid #FF1493;'>
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <div><div style="font-weight:bold; font-size:1.1em">{row['Name']}</div><div style="color:#888">{row['Map']}</div><div style="margin-top:5px">{ags_html}</div></div>
-                        <a href="{row['Link']}" target="_blank" style="background:linear-gradient(90deg, #00BFFF, #FF1493); color:white; padding:8px 15px; border-radius:5px; text-decoration:none; font-weight:bold;">OPEN LINK</a>
-                    </div>
-                </div>""", unsafe_allow_html=True)
+                map_img = get_map_img(row['Map'], 'list')
+                b64_map = img_to_b64(map_img)
+                ag_html = ""
+                for i in range(1, 6):
+                    a = row.get(f'Agent_{i}')
+                    if a and pd.notna(a):
+                        ab64 = img_to_b64(get_agent_img(a))
+                        if ab64: ag_html += f"<img src='data:image/png;base64,{ab64}' style='width:35px; height:35px; border-radius:50%; border:2px solid #111; margin-right:-10px; z-index:{i}'>"
+                
+                st.markdown(f"""<div class='pb-card'><div style="display:flex;align-items:center;gap:20px;"><div style="width:160px;height:90px;border-radius:5px;background-image:url('data:image/png;base64,{b64_map}');background-size:contain;background-position:center;background-repeat:no-repeat;border:1px solid #444;"></div><div><div style="color:#00BFFF;font-weight:bold;font-size:1.1em;text-transform:uppercase;">{row['Name']}</div><div style="color:#666;font-size:0.8em;">{row['Map']}</div></div><div style="margin-left:auto;padding-right:10px;">{ag_html}</div></div></div>""", unsafe_allow_html=True)
+                st.markdown(f'<a href="{row["Link"]}" target="_blank" style="text-decoration: none;"><button style="background: linear-gradient(90deg, #00BFFF, #FF1493); color: white; padding: 8px 15px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">OPEN LINK >></button></a>', unsafe_allow_html=True)
 
 # ==============================================================================
 # 5. RESOURCES
