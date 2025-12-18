@@ -271,130 +271,147 @@ st.markdown("""
         color: white !important;
         font-weight: bold !important;
     }
-          /* --- VALORANT STYLE MATCH CARD (FINAL) --- */
-    .val-card {
-        background-color: #121212; /* Noch dunklerer Hintergrund */
-        border-radius: 4px;
-        margin-bottom: 8px;
-        display: flex;
-        align-items: center;
-        height: 90px; /* Etwas höher für mehr Platz */
-        overflow: hidden;
-        transition: transform 0.2s, background-color 0.2s;
-        border: 1px solid #222;
-        position: relative; /* Wichtig für die absolute Positionierung der Map */
-    }
-    .val-card:hover {
-        transform: translateX(4px);
-        background-color: #1e1e1e;
-    }
-    /* Der farbige Streifen links */
-    .val-bar {
-        width: 5px;
-        height: 100%;
-        position: absolute;
-        left: 0;
-        top: 0;
-        z-index: 2;
-    }
-    /* Map Hintergrundbild mit dunklem Verlauf */
-    .val-map-bg {
-        position: absolute;
-        left: 5px; /* Startet direkt nach dem Streifen */
-        top: 0;
-        width: 220px; /* Breite des Map-Abschnitts */
-        height: 100%;
-        background-size: cover;
-        background-position: center;
-        /* Ein dunkler Verlauf macht den Text darauf lesbar */
-        background: linear-gradient(to right, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 100%);
-        z-index: 0;
-    }
-    /* Map Name und Datum */
-    .val-info {
-        position: absolute;
-        left: 25px;
-        top: 50%;
-        transform: translateY(-50%);
-        z-index: 1;
-    }
-    .val-map-name {
-        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        font-weight: 900;
-        font-size: 1.5em;
-        color: white;
-        text-transform: uppercase;
-        line-height: 1;
-        text-shadow: 1px 1px 5px rgba(0,0,0,0.8); /* Schatten für bessere Lesbarkeit */
-    }
-    .val-date {
-        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        font-size: 0.85em;
-        color: #ccc;
-        margin-top: 5px;
-        font-weight: 500;
-        text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
-    }
-    /* Container für BEIDE Teams in der Mitte */
-    .val-agents-container {
-        flex-grow: 1;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 20px; /* Abstand zwischen den Teams */
-        margin-left: 230px; /* Versatz, damit sie nicht über der Map liegen */
-        z-index: 1;
-    }
-    .val-agents-team {
-        display: flex;
-        gap: 4px; /* Abstand zwischen den Agenten eines Teams */
-    }
-    .val-agent-img {
-        width: 38px;
-        height: 38px;
-        border-radius: 4px;
-        border: 1px solid #333;
-        background: #000;
-        transition: transform 0.1s;
-    }
-    .val-agent-img:hover {
-        transform: scale(1.1);
-        z-index: 2;
-    }
-    /* Score Bereich rechts */
-    .val-score-box {
-        width: 150px;
-        text-align: right;
-        padding-right: 30px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: flex-end;
-        z-index: 1;
-    }
-    .val-score {
-        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        font-weight: 900;
-        font-size: 2.2em; /* Größerer Score */
-        line-height: 1;
-        text-shadow: 0 0 10px rgba(0,0,0,0.5);
-    }
-    /* "WATCH" Link darunter */
-    .val-vod-link {
-        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        font-size: 0.75em;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-top: 4px;
-        text-decoration: none;
-        opacity: 0.8;
-        transition: opacity 0.2s;
-    }
-    .val-vod-link:hover {
-        opacity: 1;
-        text-decoration: underline;
-    }
+        /* --- VALORANT STYLE MATCH CARD (REVISED LAYOUT) --- */
+.val-card {
+    background-color: #121212;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    display: flex; /* Flexbox aktiviert: Elemente liegen nebeneinander */
+    align-items: center;
+    height: 90px;
+    overflow: hidden;
+    border: 1px solid #222;
+    position: relative;
+    transition: transform 0.2s, background-color 0.2s;
+}
+.val-card:hover {
+    transform: translateX(4px);
+    background-color: #1a1a1a;
+}
+.val-bar {
+    width: 6px;
+    height: 100%;
+    flex-shrink: 0; /* Darf nicht schrumpfen */
+}
+
+/* ZONE 1: MAP & NAME */
+.val-map-section {
+    width: 180px; /* Feste Breite für den Map-Bereich */
+    height: 100%;
+    position: relative;
+    flex-shrink: 0;
+    margin-right: 15px;
+}
+.val-map-bg {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background-size: cover;
+    background-position: center;
+    /* Verlauf damit Text lesbar ist, aber rechts hart endet für Trennung */
+    background: linear-gradient(to right, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.9) 100%);
+    z-index: 0;
+}
+.val-map-text {
+    position: absolute;
+    top: 50%; left: 15px;
+    transform: translateY(-50%);
+    z-index: 1;
+}
+.val-map-name {
+    font-weight: 900;
+    font-size: 1.4em;
+    color: white;
+    text-transform: uppercase;
+    line-height: 1;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+}
+
+/* ZONE 2: COMPS (Nach Links gerückt) */
+.val-comps-section {
+    display: flex;
+    flex-direction: column; /* Teams untereinander statt nebeneinander für Platz */
+    justify-content: center;
+    gap: 4px;
+    margin-right: 20px;
+    flex-shrink: 0;
+}
+.val-agent-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+.val-team-label {
+    font-size: 0.6em;
+    color: #666;
+    width: 20px;
+    text-align: right;
+    margin-right: 4px;
+    font-weight: bold;
+}
+.val-agent-img {
+    width: 32px; /* Etwas kleiner damit sie untereinander passen */
+    height: 32px;
+    border-radius: 3px;
+    border: 1px solid #333;
+    background: #000;
+}
+
+/* ZONE 3: STATS (Die Mitte - Der neue "Freie Platz") */
+.val-stats-section {
+    flex-grow: 1; /* Nimmt den restlichen Platz ein */
+    display: flex;
+    flex-direction: row;
+    justify-content: center; /* Zentriert die Stats */
+    align-items: center;
+    gap: 20px; /* Abstand zwischen den Stat-Gruppen */
+    color: #ccc;
+    font-family: 'Segoe UI', sans-serif;
+}
+.stat-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+.stat-label {
+    font-size: 0.65em;
+    text-transform: uppercase;
+    color: #777;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
+}
+.stat-value {
+    font-size: 0.9em;
+    font-weight: 700;
+    color: #eee;
+}
+.stat-date {
+    font-size: 0.8em;
+    color: #aaa;
+    font-style: italic;
+}
+
+/* ZONE 4: SCORE (Rechts) */
+.val-score-section {
+    width: 120px;
+    text-align: right;
+    padding-right: 20px;
+    flex-shrink: 0;
+}
+.val-score {
+    font-weight: 900;
+    font-size: 2.2em;
+    line-height: 1;
+}
+.val-vod-link {
+    font-size: 0.75em;
+    font-weight: 700;
+    text-transform: uppercase;
+    display: block;
+    margin-top: 4px;
+    text-decoration: none;
+    opacity: 0.7;
+}
+.val-vod-link:hover { opacity: 1; text-decoration: underline; }
 /* --- POWER RANKING CARD DESIGN (FIXED & COMPACT) --- */
     .rank-row {
         background-color: #121212;
@@ -945,96 +962,103 @@ if page == "🏠 DASHBOARD":
                 st.info("Noch keine Daten für das Ranking verfügbar.")
             
             # --- RECENT ---
-       # --- RECENT ACTIVITY (VALORANT STYLE - FINAL) ---
             st.divider()
-            st.markdown("### RECENT ACTIVITY")
+            st.markdown("### 📜 RECENT MATCHES")
+            matches_to_show = df_filt.sort_values('DateObj', ascending=False).head(5)
             
-            limit = st.slider("Matches anzeigen:", 3, 20, 5, label_visibility="collapsed")
-            matches_to_show = df_filt.sort_values('DateObj', ascending=False).head(limit)
-
             for idx, row in matches_to_show.iterrows():
-                # 1. FARBEN UND LOGIK DEFINIEREN
+                
+                # 1. DATEN VORBEREITEN
                 res = row['Result']
                 score_us = int(row['Score_Us'])
                 score_en = int(row['Score_Enemy'])
                 
-                # Original Valorant Farben (Helles Grün / Rot-Pink)
+                # Farben setzen
                 if res == 'W':
-                    bar_color = "#00ff80" 
-                    score_color = "#00ff80" 
-                    vod_text = "WATCH"
+                    main_color = "#00ff80" 
                 elif res == 'L':
-                    bar_color = "#ff4655" 
-                    score_color = "#ff4655"
-                    vod_text = "WATCH" # Wie im Beispielbild (oder einfach "WATCH")
+                    main_color = "#ff4655"
                 else:
-                    bar_color = "#aaaaaa"
-                    score_color = "#ffffff"
-                    vod_text = "WATCH"
+                    main_color = "#aaaaaa"
 
-                # 2. MAP HINTERGRUNDBILD HOLEN
-                # Wir nutzen das 'list' Bild (breites Banner)
+                # Map Bild laden
                 map_img_path = get_map_img(row['Map'], 'list')
                 b64_map = img_to_b64(map_img_path)
-                # CSS für das Hintergrundbild mit einem dunklen Verlauf darüber
-                if b64_map:
-                    map_bg_style = f"background-image: linear-gradient(to right, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 100%), url('data:image/png;base64,{b64_map}');"
-                else:
-                    map_bg_style = "background-color: #222;" # Fallback
+                map_bg_style = f"background-image: linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(18,18,18,1) 100%), url('data:image/png;base64,{b64_map}');" if b64_map else "background-color: #222;"
 
-                # 3. HELFER-FUNKTION FÜR AGENTEN-ICONS (BEIDE TEAMS)
-                def get_agents_html(comp_prefix):
+                # 2. STATS EXTRAHIEREN
+                atk_w = int(row.get('Atk_R_W', 0)) if pd.notna(row.get('Atk_R_W')) else 0
+                atk_l = int(row.get('Atk_R_L', 0)) if pd.notna(row.get('Atk_R_L')) else 0
+                def_w = int(row.get('Def_R_W', 0)) if pd.notna(row.get('Def_R_W')) else 0
+                def_l = int(row.get('Def_R_L', 0)) if pd.notna(row.get('Def_R_L')) else 0
+                date_str = row['Date']
+
+                # 3. AGENTEN ICONS GENERIEREN
+                def get_agent_row_html(comp_prefix):
                     html = ""
                     for i in range(1, 6):
-                        agent_name = row.get(f'{comp_prefix}_{i}')
-                        if pd.notna(agent_name) and str(agent_name) != "":
-                            b64_img = img_to_b64(get_agent_img(agent_name))
-                            if b64_img:
-                                # Mit 'title' Attribut für Mouseover-Namen
-                                html += f"<img src='data:image/png;base64,{b64_img}' class='val-agent-img' title='{agent_name}'>"
+                        an = row.get(f'{comp_prefix}_{i}')
+                        if pd.notna(an) and str(an) != "":
+                            b64 = img_to_b64(get_agent_img(an))
+                            if b64:
+                                html += f"<img src='data:image/png;base64,{b64}' class='val-agent-img' title='{an}'>"
                             else:
-                                html += f"<div class='val-agent-img' style='background:#333' title='Unknown'></div>"
+                                html += f"<div class='val-agent-img' style='background:#333' title='?'></div>"
+                        else:
+                             html += f"<div class='val-agent-img' style='background:transparent; border:1px dashed #333'></div>"
                     return html
 
-                # HTML für beide Teams generieren
-                my_agents_html = get_agents_html('MyComp')
-                en_agents_html = get_agents_html('EnComp')
-                
-                # 4. VOD LINK GENERIEREN
-                vod_link = row.get('VOD_Link')
-                # Prüfen, ob ein gültiger Link existiert
-                if pd.notna(vod_link) and str(vod_link).startswith("http"):
-                    vod_html = f'<a href="{vod_link}" target="_blank" class="val-vod-link" style="color: {score_color};">{vod_text}</a>'
-                else:
-                    # Inaktiver Text, wenn kein Link da ist
-                    vod_html = f'<span class="val-vod-link" style="color: {score_color}; opacity: 0.5;">{vod_text}</span>'
+                my_agents = get_agent_row_html('MyComp')
+                en_agents = get_agent_row_html('EnComp')
 
-                # 5. DAS FINALE HTML ZUSAMMENBAUEN
+                # 4. VOD LINK
+                vod_link = row.get('VOD_Link')
+                vod_html = ""
+                if pd.notna(vod_link) and str(vod_link).startswith("http"):
+                    vod_html = f'<a href="{vod_link}" target="_blank" class="val-vod-link" style="color: {main_color};">WATCH VOD ↗</a>'
+
+                # 5. HTML ZUSAMMENBAUEN
                 html_card = f"""
                 <div class="val-card">
-                    <div class="val-bar" style="background-color: {bar_color};"></div>
-                    
-                    <div class="val-map-bg" style="{map_bg_style}"></div>
-                    
-                    <div class="val-info">
-                        <div class="val-map-name">{row['Map']}</div>
-                        <div class="val-date">{row['Date']}</div>
+                    <div class="val-bar" style="background-color: {main_color};"></div>
+                    <div class="val-map-section">
+                        <div class="val-map-bg" style="{map_bg_style}"></div>
+                        <div class="val-map-text">
+                            <div class="val-map-name">{row['Map']}</div>
+                        </div>
                     </div>
-                    
-                    <div class="val-agents-container">
-                        <div class="val-agents-team">{my_agents_html}</div>
-                        <div style="color:#666; font-weight:bold; font-size:0.8em;">VS</div>
-                        <div class="val-agents-team">{en_agents_html}</div>
+                    <div class="val-comps-section">
+                        <div class="val-agent-row">
+                            <div class="val-team-label" style="color:#00ff80">US</div>
+                            {my_agents}
+                        </div>
+                        <div class="val-agent-row">
+                            <div class="val-team-label" style="color:#ff4655">EN</div>
+                            {en_agents}
+                        </div>
                     </div>
-                    
-                    <div class="val-score-box">
-                        <div class="val-score" style="color: {score_color};">{score_us} : {score_en}</div>
+                    <div class="val-stats-section">
+                        <div class="stat-group">
+                            <div class="stat-label">ATTACK</div>
+                            <div class="stat-value" style="color:#ff99aa">{atk_w} - {atk_l}</div>
+                        </div>
+                        <div class="stat-group">
+                            <div class="stat-label">DEFENSE</div>
+                            <div class="stat-value" style="color:#99ffcc">{def_w} - {def_l}</div>
+                        </div>
+                        <div class="stat-group">
+                            <div class="stat-label">DATE</div>
+                            <div class="stat-date">{date_str}</div>
+                        </div>
+                    </div>
+                    <div class="val-score-section">
+                        <div class="val-score" style="color: {main_color};">{score_us} : {score_en}</div>
                         {vod_html}
                     </div>
                 </div>
                 """
                 
-                # WICHTIG: .replace("\n", " ") entfernt Umbrüche für Streamlit
+                # HIER WAR DER FEHLER: Diese Zeile muss bündig mit 'html_card =' sein
                 st.markdown(html_card.replace("\n", " "), unsafe_allow_html=True)
 
 # ==============================================================================
@@ -1042,7 +1066,7 @@ if page == "🏠 DASHBOARD":
 # ==============================================================================
 elif page == "👥 COACHING":
     st.title("👥 PLAYER COACHING")
-    
+
     # Get current user info
     current_user = st.session_state.get('username', '')
     user_role = st.session_state.get('role', '')
