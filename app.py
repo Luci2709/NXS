@@ -2532,6 +2532,16 @@ elif page == "📊 PLAYERS":
             if v >= good_thresh: return c_good
             elif v >= bad_thresh: return c_avg
             else: return c_bad
+            
+    def style_purple_gradient(s):
+        """Custom gradient to avoid matplotlib dependency"""
+        try:
+            s_num = pd.to_numeric(s, errors='coerce').fillna(0)
+            max_val = s_num.max()
+            if max_val == 0: return [''] * len(s)
+            return [f'background-color: rgba(147, 112, 219, {0.1 + (v/max_val)*0.6})' for v in s_num]
+        except:
+            return [''] * len(s)
 
     # TABS ERSTELLEN
     tab_overview, tab_deep = st.tabs(["📊 TEAM OVERVIEW", "🧬 DEEP DIVE ANALYZER"])
@@ -2818,7 +2828,7 @@ elif page == "📊 PLAYERS":
                 .map(lambda v: style_good_bad(v, 60, 45), subset=['Win%'])\
                 .map(lambda v: style_good_bad(v, 1.2, 0.9), subset=['K/D'])\
                 .map(lambda v: style_good_bad(v, 25, 15), subset=['HS%'])\
-                .background_gradient(cmap='Purples', subset=['C', 'Q', 'E', 'X'])
+                .apply(style_purple_gradient, subset=['C', 'Q', 'E', 'X'])
 
             st.dataframe(
                 styler,
