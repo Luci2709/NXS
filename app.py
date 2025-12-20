@@ -14,7 +14,7 @@ import io
 import numpy as np
 import time
 from datetime import datetime, date, timedelta
-from PIL import Image
+from PIL import Image, ImageDraw
 
 # ==============================================================================
 # 🔧 ROBUST MONKEY PATCH (Fix für Component Error & Streamlit 1.40+)
@@ -575,6 +575,73 @@ def load_csv_generic(filepath, cols):
     if os.path.exists(filepath): return pd.read_csv(filepath)
     return pd.DataFrame(columns=cols)
 
+def render_visual_selection(options, type_item, key_prefix, default=None, multi=True, key_state=None):
+    """
+    Renders a grid of images for selection instead of a dropdown.
+    """
+    selected = default if default is not None else []
+    if not multi and key_state and key_state in st.session_state:
+        current_selection = st.session_state[key_state]
+    else:
+        current_selection = default
+
+    # CSS to center checkboxes/buttons
+    st.markdown("<style>div[data-testid='stColumn'] {text-align: center;} div[data-testid='stCheckbox'] {display: inline-block;}</style>", unsafe_allow_html=True)
+
+    cols = st.columns(6 if type_item == 'map' else 8)
+    for i, opt in enumerate(options):
+        with cols[i % len(cols)]:
+            # Image
+            if type_item == 'agent':
+                img_path = get_agent_img(opt)
+                if img_path:
+                    try:
+                        with Image.open(img_path) as img:
+                            img = img.convert("RGBA")
+                            img.thumbnail((100, 100), Image.Resampling.LANCZOS)
+                            
+                            # Agent Colors
+                            ac = {
+                                "astra": "#653491", "breach": "#bc5434", "brimstone": "#d56e23", "chamber": "#e3b62d",
+                                "clove": "#e882a8", "cypher": "#d6d6d6", "deadlock": "#bcc6cc", "fade": "#4c4c4c",
+                                "gekko": "#b6ff59", "harbor": "#2d6e68", "iso": "#4b48ac", "jett": "#90e0ef",
+                                "kay/o": "#4bb0a8", "killjoy": "#f7d336", "neon": "#2c4f9e", "omen": "#4f4f8f",
+                                "phoenix": "#ff7f50", "raze": "#ff6a00", "reyna": "#b74b8e", "sage": "#52ffce",
+                                "skye": "#8fbc8f", "sova": "#6fa8dc", "viper": "#32cd32", "yoru": "#334488", "vyse": "#7b68ee"
+                            }
+                            bg_col = ac.get(opt.lower(), "#2c003e")
+                            
+                            # Circular Icon with Dynamic Background
+                            bg = Image.new("RGBA", (100, 100), bg_col)
+                            offset = ((100 - img.width) // 2, (100 - img.height) // 2)
+                            bg.paste(img, offset, img)
+                            mask = Image.new("L", (100, 100), 0)
+                            draw = ImageDraw.Draw(mask)
+                            draw.ellipse((0, 0, 100, 100), fill=255)
+                            final = Image.new("RGBA", (100, 100), (0,0,0,0))
+                            final.paste(bg, (0,0), mask=mask)
+                            st.image(final, width=55)
+                    except: st.image(img_path, width=55)
+                else: st.info(opt[:3])
+            else:
+                img_path = get_map_img(opt, 'list')
+                if img_path: st.image(img_path, use_container_width=True)
+                else: st.info(opt[:3])
+            
+            # Selection Mechanism
+            if multi:
+                if st.checkbox(" ", key=f"{key_prefix}_{opt}", value=(opt in selected), label_visibility="collapsed"):
+                    if opt not in selected: selected.append(opt)
+                elif opt in selected:
+                    selected.remove(opt)
+            else:
+                # Single Select (Button acts as selector)
+                if st.button("Select", key=f"{key_prefix}_{opt}"):
+                    if key_state: st.session_state[key_state] = opt
+                    st.rerun()
+    
+    return selected
+
 # --- SPEICHER FUNKTIONEN (GOOGLE SHEETS) ---
 # WICHTIG: Diese Funktionen müssen VOR der UI definiert sein
 
@@ -584,9 +651,48 @@ def save_matches(df_new):
     except Exception as e: st.error(f"Save Error: {e}")
 
 def save_player_stats(df_new):
+    """Saves player stats. Tries to update, if fails (missing sheet), tries to create."""
+    worksheet_name = "Premier - PlayerStats"
     try:
-        conn.update(worksheet="Premier - PlayerStats", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
+        # 1. Read existing data
+        try:
+            df_existing = conn.read(worksheet=worksheet_name, ttl=0).dropna(how="all")
+        except Exception:
+            # If sheet is empty or doesn't exist, start fresh
+            df_existing = pd.DataFrame()
+
+        # 2. Combine new data with existing data
+        df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+        
+        # Drop duplicates based on MatchID and Player to prevent re-imports
+        if 'MatchID' in df_combined.columns and 'Player' in df_combined.columns:
+            df_combined.drop_duplicates(subset=['MatchID', 'Player'], keep='last', inplace=True)
+
+        # 3. Clean the ENTIRE combined DataFrame
+        expected_types = {
+            'Kills': int, 'Deaths': int, 'Assists': int, 'Score': int, 'Rounds': int, 'HS': float
+        }
+        for col, dtype in expected_types.items():
+            if col in df_combined.columns:
+                df_combined[col] = pd.to_numeric(df_combined[col], errors='coerce').fillna(0)
+                df_combined[col] = df_combined[col].astype(dtype)
+
+        # 4. Try to Update. If sheet missing (KeyError), try Create.
+        try:
+            conn.update(worksheet=worksheet_name, data=df_combined)
+        except Exception as update_err:
+            # Check for KeyError (Sheet not found) or if the error message contains the sheet name
+            if isinstance(update_err, KeyError) or worksheet_name in str(update_err):
+                conn.create(worksheet=worksheet_name, data=df_combined)
+            else:
+                raise update_err
+
+        time.sleep(1)
+        st.cache_data.clear()
+
+    except Exception as e:
+        st.error(f"Save Error for '{worksheet_name}': {e}")
+        st.info("Check if the worksheet name in Google Sheets matches 'Premier - PlayerStats' exactly (watch out for spaces!).")
 
 def save_scrims(df_new):
     try:
@@ -647,6 +753,8 @@ def update_availability(scrim_id, player, status):
     """Update or create availability entry for a player (GSheet Version)"""
     try:
         df_avail = conn.read(worksheet="scrim_availability", ttl=0)
+        if df_avail.empty or 'ScrimID' not in df_avail.columns:
+            df_avail = pd.DataFrame(columns=['ScrimID', 'Player', 'Available', 'UpdatedAt'])
     except:
         df_avail = pd.DataFrame(columns=['ScrimID', 'Player', 'Available', 'UpdatedAt'])
     
@@ -670,16 +778,142 @@ def delete_scrim(scrim_id):
     """Delete a scrim and all its availability data (GSheet Version)"""
     try:
         df_scrims = conn.read(worksheet="scrims", ttl=0)
-        df_scrims = df_scrims[df_scrims['ID'] != scrim_id]
-        save_scrims(df_scrims)
+        if not df_scrims.empty and 'ID' in df_scrims.columns:
+            df_scrims = df_scrims[df_scrims['ID'] != scrim_id]
+            save_scrims(df_scrims)
         
         # Delete availability
         df_avail = conn.read(worksheet="scrim_availability", ttl=0)
-        df_avail = df_avail[df_avail['ScrimID'] != scrim_id]
-        save_scrim_availability(df_avail)
+        if not df_avail.empty and 'ScrimID' in df_avail.columns:
+            df_avail = df_avail[df_avail['ScrimID'] != scrim_id]
+            save_scrim_availability(df_avail)
     except Exception as e:
         st.error(f"Error deleting scrim: {e}")
 
+# ==============================================================================
+# 🛠️ UPDATE: PARSER MIT UTILITY & AGENT STATS
+# ==============================================================================
+def parse_tracker_json(file_input):
+    try:
+        if isinstance(file_input, str):
+            with open(file_input, 'r', encoding='utf-8') as f: data = json.load(f)
+        else:
+            data = json.load(file_input)
+
+        parsed_data = []
+        
+        # --- MODUS 1: MATCH HISTORY (Liste von Matches) ---
+        matches = data.get('data', {}).get('matches', [])
+        
+        # Fallback: Einzelnes Match (Tracker v2)
+        if not matches:
+            d = data.get('data', {})
+            if 'metadata' in d and 'segments' in d and 'matches' not in d:
+                 if 'matchId' in d.get('metadata', {}) or 'id' in d.get('attributes', {}):
+                     matches = [d]
+        
+        if matches:
+            for m in matches:
+                meta = m.get('metadata', {})
+                segments = m.get('segments', [])
+                
+                # Suche Player Stats (alle Spieler durchgehen, Filter passiert später)
+                p_segs = [s for s in segments if s.get('type') == 'player-summary']
+                
+                for p_seg in p_segs:
+                    stats = p_seg.get('stats', {})
+                    attrs = p_seg.get('attributes', {})
+                    
+                    # Core Stats
+                    kills = stats.get('kills', {}).get('value', 0)
+                    deaths = stats.get('deaths', {}).get('value', 1)
+                    assists = stats.get('assists', {}).get('value', 0)
+                    
+                    # Aiming
+                    hs = stats.get('headshots', {}).get('value', 0)
+                    total_hits = hs + stats.get('bodyshots', {}).get('value', 0) + stats.get('legshots', {}).get('value', 0)
+                    hs_percent = (hs / total_hits * 100) if total_hits > 0 else 0
+                    
+                    # Utility
+                    c_grenade = stats.get('grenadeCasts', {}).get('value', 0)
+                    c_abil1 = stats.get('ability1Casts', {}).get('value', 0)
+                    c_abil2 = stats.get('ability2Casts', {}).get('value', 0)
+                    c_ult = stats.get('ultimateCasts', {}).get('value', 0)
+                    
+                    # Result
+                    res = "Unknown"
+                    if 'result' in meta: res = meta['result']
+                    elif 'hasWon' in stats: res = "Victory" if stats['hasWon']['value'] else "Defeat"
+                    elif 'hasWon' in p_seg.get('metadata', {}): res = "Victory" if p_seg['metadata']['hasWon'] else "Defeat"
+                    
+                    parsed_data.append({
+                        'MatchID': m.get('attributes', {}).get('id', 'Unknown'),
+                        'Date': meta.get('modeName', 'Ranked'),
+                        'Map': meta.get('mapName', 'Unknown'),
+                        'Player': attrs.get('platformUserIdentifier', 'Unknown').split('#')[0],
+                        'Agent': p_seg.get('metadata', {}).get('agentName', 'Unknown'),
+                        'Result': res,
+                        'Kills': kills, 'Deaths': deaths, 'Assists': assists,
+                        'KD': kills/deaths if deaths>0 else kills,
+                        'HS%': hs_percent,
+                        'ADR': stats.get('damagePerRound', {}).get('value', 0),
+                        'Rounds': stats.get('roundsPlayed', {}).get('value', 1),
+                        'Cast_Grenade': c_grenade, 'Cast_Abil1': c_abil1,
+                        'Cast_Abil2': c_abil2, 'Cast_Ult': c_ult,
+                        'Total_Util': c_grenade + c_abil1 + c_abil2 + c_ult,
+                        'MatchesPlayed': 1,
+                        'Wins': 1 if res == "Victory" else 0
+                    })
+
+        # --- MODUS 2: PROFILE EXPORT (Aggregierte Segmente) ---
+        if not parsed_data:
+            segments = data.get('data', {}).get('segments', [])
+            # Wir bevorzugen 'agent-top-map' Segmente für Map-Details, sonst 'agent'
+            map_segs = [s for s in segments if s.get('type') == 'agent-top-map']
+            if not map_segs:
+                map_segs = [s for s in segments if s.get('type') == 'agent']
+            
+            player_name = data.get('data', {}).get('platformInfo', {}).get('platformUserIdentifier', 'Unknown').split('#')[0]
+            
+            for s in map_segs:
+                stats = s.get('stats', {})
+                meta = s.get('metadata', {})
+                attrs = s.get('attributes', {})
+                
+                # Map Name (aus mapKey oder 'All')
+                map_name = attrs.get('mapKey', 'All').capitalize() if 'mapKey' in attrs else 'All'
+                
+                # Utility
+                c_grenade = stats.get('grenadeCasts', {}).get('value', 0)
+                c_abil1 = stats.get('ability1Casts', {}).get('value', 0)
+                c_abil2 = stats.get('ability2Casts', {}).get('value', 0)
+                c_ult = stats.get('ultimateCasts', {}).get('value', 0)
+                
+                parsed_data.append({
+                    'MatchID': 'Profile_Aggregated',
+                    'Date': 'Aggregated',
+                    'Map': map_name,
+                    'Player': player_name,
+                    'Agent': meta.get('name', 'Unknown'),
+                    'Result': 'Aggregated',
+                    'Kills': stats.get('kills', {}).get('value', 0),
+                    'Deaths': stats.get('deaths', {}).get('value', 0),
+                    'Assists': stats.get('assists', {}).get('value', 0),
+                    'KD': stats.get('kdRatio', {}).get('value', 0),
+                    'HS%': stats.get('headshotsPercentage', {}).get('value', 0),
+                    'ADR': stats.get('damagePerRound', {}).get('value', 0),
+                    'Rounds': stats.get('roundsPlayed', {}).get('value', 0),
+                    'Cast_Grenade': c_grenade, 'Cast_Abil1': c_abil1,
+                    'Cast_Abil2': c_abil2, 'Cast_Ult': c_ult,
+                    'Total_Util': c_grenade + c_abil1 + c_abil2 + c_ult,
+                    'MatchesPlayed': stats.get('matchesPlayed', {}).get('value', 0),
+                    'Wins': stats.get('matchesWon', {}).get('value', 0)
+                })
+                
+        return pd.DataFrame(parsed_data)
+    except Exception as e:
+        print(f"Parser Error: {e}")
+        return pd.DataFrame() # Silent fail oder st.error(e) zum Debuggen
 # ==============================================================================
 # 💾 GOOGLE SHEETS DATA LOADER (MIT RATE LIMIT SCHUTZ)
 # ==============================================================================
@@ -692,7 +926,17 @@ def load_data(dummy=None):
         for attempt in range(max_retries):
             try:
                 # Versuche zu lesen
-                return conn.read(worksheet=worksheet_name, ttl=0).dropna(how="all")
+                df = conn.read(worksheet=worksheet_name, ttl=0).dropna(how="all")
+                if df.empty and cols:
+                    return pd.DataFrame(columns=cols)
+                
+                # Ensure columns exist
+                if cols:
+                    for col in cols:
+                        if col not in df.columns:
+                            df[col] = None
+                            
+                return df
             except Exception as e:
                 # Prüfen ob es ein Rate Limit Fehler ist (Code 429)
                 if "429" in str(e) or "Quota exceeded" in str(e):
@@ -730,7 +974,7 @@ def load_data(dummy=None):
 
     # Block 2: Statistiken & Scrims
     df_p = get_sheet("Premier - PlayerStats")
-    df_scrims = get_sheet("scrims", ['ID', 'Title', 'Date', 'Time', 'Map', 'Description', 'CreatedBy', 'CreatedAt'])
+    df_scrims = get_sheet("scrims", ['ID', 'Title', 'Date', 'Time', 'Map', 'Description', 'CreatedBy', 'CreatedAt', 'PlaybookLink', 'VideoLink'])
     if not df_scrims.empty:
         df_scrims['DateTimeObj'] = pd.to_datetime(df_scrims['Date'] + ' ' + df_scrims['Time'], format="%Y-%m-%d %H:%M", errors='coerce')
     
@@ -809,257 +1053,283 @@ with st.sidebar:
 # 1. DASHBOARD
 # ==============================================================================
 if page == "🏠 DASHBOARD":
-    # Get current user info for notifications
+    # Get current user info
     current_user = st.session_state.get('username', '')
     user_role = st.session_state.get('role', '')
-    
-    # --- FIX: Variablen standardmäßig initialisieren, um NameError zu verhindern ---
+
+    # --- Data for "What's Next" widget ---
     incomplete_todos = 0
     unread_messages = 0
-    # ------------------------------------------------------------------------------
+    next_event_str = "No upcoming events."
+    next_event_nav = None
 
-    # Player notifications for todos and messages
+    # Player-specific data
     if user_role == 'player' and current_user:
-        # Check for incomplete todos
-        player_todos = df_todos[(df_todos['Player'] == current_user) & (df_todos['Completed'] == False)] if not df_todos.empty else pd.DataFrame()
+        player_todos = df_todos[(df_todos['Player'] == current_user) & (df_todos['Completed'] == False)]
         incomplete_todos = len(player_todos)
-        
-        # Check for unread messages
-        player_messages = df_messages[(df_messages['ToUser'] == current_user) & (df_messages['Read'] == False)] if not df_messages.empty else pd.DataFrame()
+        player_messages = df_messages[(df_messages['ToUser'] == current_user) & (df_messages['Read'] == False)]
         unread_messages = len(player_messages)
-        
-        # Show notification popup above everything
-        if incomplete_todos > 0 or unread_messages > 0:
-            if incomplete_todos > 0 and unread_messages > 0:
-                st.info(f"🔔 You have {incomplete_todos} pending task(s) and {unread_messages} unread message(s)!")
-            elif incomplete_todos > 0:
-                st.info(f"🔔 You have {incomplete_todos} pending task(s)!")
-            elif unread_messages > 0:
-                st.info(f"🔔 You have {unread_messages} unread message(s)!")
-    
-    st.title("PERFORMANCE DASHBOARD")
-    
-    # Button logic for notifications
-    if (incomplete_todos > 0 or unread_messages > 0) and user_role == 'player':
-        st.markdown("---")
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            notification_text = ""
-            if incomplete_todos > 0 and unread_messages > 0:
-                notification_text = f"🔔 You have {incomplete_todos} pending task(s) and {unread_messages} unread message(s)!"
-            elif incomplete_todos > 0:
-                notification_text = f"🔔 You have {incomplete_todos} pending task(s)!"
-            elif unread_messages > 0:
-                notification_text = f"🔔 You have {unread_messages} unread message(s)!"
-            
-            if st.button(notification_text, type="primary"):
-                st.session_state["navigation_radio"] = "👥 COACHING"
-                st.rerun()
-        st.markdown("---")
-    
-    # --- Statistiken und Charts ---
-    if not df.empty:
-        min_date = df['DateObj'].min() if pd.notna(df['DateObj'].min()) else datetime(2024,1,1)
-        c1, c2 = st.columns([1,3])
-        with c1: start_d = st.date_input("Stats ab:", min_date)
-        df_filt = df[df['DateObj'] >= pd.Timestamp(start_d)].copy()
-        
-        if not df_filt.empty:
-            # --- CONFIDENCE SCALE ---
-            st.divider(); st.markdown("### 📊 MAP CONFIDENCE")
-            all_maps = sorted(df_filt['Map'].unique())
-            sel_maps = st.multiselect("Wähle Maps:", all_maps, default=all_maps)
-            conf_list = []
-            for m in (sel_maps if sel_maps else all_maps):
-                md = df_filt[df_filt['Map']==m]
-                if md.empty: continue
-                g=len(md); w=len(md[md['Result']=='W']); delta=md['Delta'].sum()
-                wr=w/g*100; score=(wr*1.0)+(g*2.0)+(delta*0.5)
-                # DASHBOARD: nutzt 'list' (Banner)
-                img_p = get_map_img(m, type='list'); 
-                b64 = img_to_b64(img_p)
-                col = "#00ff80" if score>=60 else "#ffeb3b" if score>=40 else "#ff1493"
-                conf_list.append({'M':m, 'S':score, 'WR':wr, 'I':b64, 'C':col})
-            
-            conf_list.sort(key=lambda x: x['S'], reverse=True)
-            html = "<div class='conf-scroll-wrapper'>"
-            for c in conf_list:
-                img_tag = f"<img src='data:image/png;base64,{c['I']}'>" if c['I'] else ""
-                html += f"<div class='conf-card' style='border-bottom: 4px solid {c['C']}'><div class='conf-img-container'>{img_tag}</div><div class='conf-body'><div style='font-weight:bold; color:white'>{c['M']}</div><div class='conf-val' style='color:{c['C']}'>{c['S']:.1f}</div><div class='conf-sub'>{c['WR']:.0f}% WR</div></div></div>"
-            st.markdown(html+"</div>", unsafe_allow_html=True)
-            
-            # --- TABLE ---
-            # --- POWER RANKING (CUSTOM UI) ---
-            st.divider()
-            st.markdown("### 🏆 POWER RANKING")
-            
-            # Daten vorbereiten (wie vorher)
-            rank_df = pd.DataFrame(conf_list).rename(columns={'M':'Map','S':'Score','WR':'Winrate'})
-            
-            if not rank_df.empty:
-                # Max Score finden für die Berechnung der Balkenlänge (100% Breite)
-                max_score = rank_df['Score'].max() if rank_df['Score'].max() > 0 else 1
-                
-                # Header (Optional, aber schön für Übersicht)
-                # st.caption("MAP PERFORMANCE BREAKDOWN")
+    # Upcoming events (Scrims and Calendar)
+    now = pd.Timestamp.now()
+    upcoming_events = []
+    if not df_scrims.empty and 'DateTimeObj' in df_scrims.columns:
+        upcoming_scrims = df_scrims[df_scrims['DateTimeObj'] >= now].copy()
+        if not upcoming_scrims.empty:
+            upcoming_scrims['Type'] = 'Scrim'
+            upcoming_scrims['Title'] = upcoming_scrims['Title']
+            upcoming_scrims['DateTime'] = upcoming_scrims['DateTimeObj']
+            upcoming_events.append(upcoming_scrims[['DateTime', 'Title', 'Type']])
 
-                for idx, row in rank_df.iterrows():
-                    # 1. Daten holen
-                    map_name = row['Map']
-                    score = row['Score']
-                    winrate = row['Winrate']
+    if not df_cal.empty and 'Date' in df_cal.columns and 'Time' in df_cal.columns:
+        df_cal_copy = df_cal.copy()
+        df_cal_copy['DateTime'] = pd.to_datetime(df_cal_copy['Date'] + ' ' + df_cal_copy['Time'], format="%d.%m.%Y %H:%M", errors='coerce')
+        upcoming_cal = df_cal_copy[df_cal_copy['DateTime'] >= now]
+        if not upcoming_cal.empty:
+            upcoming_cal = upcoming_cal.rename(columns={'Event': 'Title'})
+            upcoming_events.append(upcoming_cal[['DateTime', 'Title', 'Type']])
+
+    if upcoming_events:
+        all_upcoming = pd.concat(upcoming_events).sort_values('DateTime').iloc[0]
+        event_time = all_upcoming['DateTime']
+        time_delta = event_time - now
+        
+        if time_delta.days < 1:
+            hours, rem = divmod(time_delta.seconds, 3600)
+            minutes, _ = divmod(rem, 60)
+            if hours > 0:
+                next_event_str = f"**{all_upcoming['Title']}** in {hours}h {minutes}m"
+            else:
+                next_event_str = f"**{all_upcoming['Title']}** in {minutes}m"
+        else:
+            next_event_str = f"**{all_upcoming['Title']}** in {time_delta.days} day(s)"
+        
+        next_event_nav = "⚽ SCRIMS" if all_upcoming['Type'] == 'Scrim' else "📅 CALENDAR"
+
+    st.title("PERFORMANCE DASHBOARD")
+
+    # --- Page Layout ---
+    main_col, side_col = st.columns([3.5, 1])
+
+    with side_col:
+        st.markdown("##### 🔔 WHAT'S NEXT")
+        with st.container(border=True):
+            if next_event_nav and st.button(f"🗓️ {next_event_str}", use_container_width=True, key="dash_nav_event"):
+                st.session_state['trigger_navigation'] = next_event_nav; st.rerun()
+            if incomplete_todos > 0 and st.button(f"📝 **{incomplete_todos}** pending task(s)", use_container_width=True, key="dash_nav_todo"):
+                st.session_state['trigger_navigation'] = "👥 COACHING"; st.rerun()
+            if unread_messages > 0 and st.button(f"💬 **{unread_messages}** unread message(s)", use_container_width=True, key="dash_nav_msg"):
+                st.session_state['trigger_navigation'] = "👥 COACHING"; st.rerun()
+            if not next_event_nav and incomplete_todos == 0 and unread_messages == 0:
+                st.caption("All clear! ✨")
+
+    with main_col:
+        # --- Statistiken und Charts ---
+        if not df.empty:
+            min_date = df['DateObj'].min() if pd.notna(df['DateObj'].min()) else datetime(2024,1,1)
+            c1, c2 = st.columns([1,3])
+            with c1: start_d = st.date_input("Stats ab:", min_date)
+            df_filt = df[df['DateObj'] >= pd.Timestamp(start_d)].copy()
+            
+            if not df_filt.empty:
+                # --- CONFIDENCE SCALE ---
+                st.divider(); st.markdown("### 📊 MAP CONFIDENCE")
+                all_maps = sorted(df_filt['Map'].unique())
+                sel_maps = st.multiselect("Wähle Maps:", all_maps, default=all_maps)
+                conf_list = []
+                for m in (sel_maps if sel_maps else all_maps):
+                    md = df_filt[df_filt['Map']==m]
+                    if md.empty: continue
+                    g=len(md); w=len(md[md['Result']=='W']); delta=md['Delta'].sum()
+                    wr=w/g*100; score=(wr*1.0)+(g*2.0)+(delta*0.5)
+                    # DASHBOARD: nutzt 'list' (Banner)
+                    img_p = get_map_img(m, type='list'); 
+                    b64 = img_to_b64(img_p)
+                    col = "#00ff80" if score>=60 else "#ffeb3b" if score>=40 else "#ff1493"
+                    conf_list.append({'M':m, 'S':score, 'WR':wr, 'I':b64, 'C':col})
+                
+                conf_list.sort(key=lambda x: x['S'], reverse=True)
+                html = "<div class='conf-scroll-wrapper'>"
+                for c in conf_list:
+                    img_tag = f"<img src='data:image/png;base64,{c['I']}'>" if c['I'] else ""
+                    html += f"<div class='conf-card' style='border-bottom: 4px solid {c['C']}'><div class='conf-img-container'>{img_tag}</div><div class='conf-body'><div style='font-weight:bold; color:white'>{c['M']}</div><div class='conf-val' style='color:{c['C']}'>{c['S']:.1f}</div><div class='conf-sub'>{c['WR']:.0f}% WR</div></div></div>"
+                st.markdown(html+"</div>", unsafe_allow_html=True)
+                
+                # --- TABLE ---
+                # --- POWER RANKING (CUSTOM UI) ---
+                st.divider()
+                st.markdown("### 🏆 POWER RANKING")
+                
+                # Daten vorbereiten (wie vorher)
+                rank_df = pd.DataFrame(conf_list).rename(columns={'M':'Map','S':'Score','WR':'Winrate'})
+                
+                if not rank_df.empty:
+                    # Max Score finden für die Berechnung der Balkenlänge (100% Breite)
+                    max_score = rank_df['Score'].max() if rank_df['Score'].max() > 0 else 1
                     
-                    # 2. Bild holen (als Base64)
-                    # Wir nutzen hier 'list' (breit) oder 'icon' (quadratisch) - was du lieber magst
-                    img_path = get_map_img(map_name, 'list') 
-                    b64_img = img_to_b64(img_path)
-                    img_html = f"<img src='data:image/png;base64,{b64_img}' class='rank-img'>" if b64_img else ""
-                    
-                    # 3. Balkenbreiten berechnen (in %)
-                    # Score relativ zum besten Score
-                    score_width = min(int((score / max_score) * 100), 100)
-                    # Winrate ist einfach der Prozentwert
-                    winrate_width = int(winrate)
-                    
-                    # 4. Farben für Balken definieren
-                    # Score: Cyan (#00BFFF)
-                    # Winrate: Pink (#FF1493) oder dynamisch (Grün/Rot)
-                    wr_color = "#00ff80" if winrate >= 50 else "#ff4655" # Grün wenn >50%, sonst Rot
-                    
-                    # 5. HTML zusammenbauen
-                    html_rank = f"""
-                    <div class="rank-row">
-                        <div class="rank-img-box">
-                            {img_html}
-                        </div>
+                    # Header (Optional, aber schön für Übersicht)
+                    # st.caption("MAP PERFORMANCE BREAKDOWN")
+
+                    for idx, row in rank_df.iterrows():
+                        # 1. Daten holen
+                        map_name = row['Map']
+                        score = row['Score']
+                        winrate = row['Winrate']
                         
-                        <div class="rank-name">{map_name}</div>
+                        # 2. Bild holen (als Base64)
+                        # Wir nutzen hier 'list' (breit) oder 'icon' (quadratisch) - was du lieber magst
+                        img_path = get_map_img(map_name, 'list') 
+                        b64_img = img_to_b64(img_path)
+                        img_html = f"<img src='data:image/png;base64,{b64_img}' class='rank-img'>" if b64_img else ""
                         
-                        <div class="rank-stats">
-                            <div class="stat-line">
-                                <div class="stat-label">RATING</div>
-                                <div class="prog-bg">
-                                    <div class="prog-fill" style="width: {score_width}%; background-color: #00BFFF; box-shadow: 0 0 10px rgba(0, 191, 255, 0.4);"></div>
-                                </div>
-                                <div class="stat-val" style="color: #00BFFF;">{score:.1f}</div>
+                        # 3. Balkenbreiten berechnen (in %)
+                        # Score relativ zum besten Score
+                        score_width = min(int((score / max_score) * 100), 100)
+                        # Winrate ist einfach der Prozentwert
+                        winrate_width = int(winrate)
+                        
+                        # 4. Farben für Balken definieren
+                        # Score: Cyan (#00BFFF)
+                        # Winrate: Pink (#FF1493) oder dynamisch (Grün/Rot)
+                        wr_color = "#00ff80" if winrate >= 50 else "#ff4655" # Grün wenn >50%, sonst Rot
+                        
+                        # 5. HTML zusammenbauen
+                        html_rank = f"""
+                        <div class="rank-row">
+                            <div class="rank-img-box">
+                                {img_html}
                             </div>
                             
-                            <div class="stat-line">
-                                <div class="stat-label">WIN %</div>
-                                <div class="prog-bg">
-                                    <div class="prog-fill" style="width: {winrate_width}%; background-color: {wr_color};"></div>
+                            <div class="rank-name">{map_name}</div>
+                            
+                            <div class="rank-stats">
+                                <div class="stat-line">
+                                    <div class="stat-label">RATING</div>
+                                    <div class="prog-bg">
+                                        <div class="prog-fill" style="width: {score_width}%; background-color: #00BFFF; box-shadow: 0 0 10px rgba(0, 191, 255, 0.4);"></div>
+                                    </div>
+                                    <div class="stat-val" style="color: #00BFFF;">{score:.1f}</div>
                                 </div>
-                                <div class="stat-val" style="color: {wr_color};">{winrate:.0f}%</div>
+                                
+                                <div class="stat-line">
+                                    <div class="stat-label">WIN %</div>
+                                    <div class="prog-bg">
+                                        <div class="prog-fill" style="width: {winrate_width}%; background-color: {wr_color};"></div>
+                                    </div>
+                                    <div class="stat-val" style="color: {wr_color};">{winrate:.0f}%</div>
+                                </div>
                             </div>
+                        </div>
+                        """
+                        
+                        # Rendern ohne Zeilenumbrüche
+                        st.markdown(html_rank.replace("\n", " "), unsafe_allow_html=True)
+
+                else:
+                    st.info("Noch keine Daten für das Ranking verfügbar.")
+                
+                # --- RECENT ---
+                st.divider()
+                st.markdown("### 📜 RECENT MATCHES")
+                matches_to_show = df_filt.sort_values('DateObj', ascending=False).head(5)
+                
+                for idx, row in matches_to_show.iterrows():
+                    
+                    # 1. DATEN VORBEREITEN
+                    res = row['Result']
+                    score_us = int(row['Score_Us'])
+                    score_en = int(row['Score_Enemy'])
+                    
+                    # Farben setzen
+                    if res == 'W':
+                        main_color = "#00ff80" 
+                    elif res == 'L':
+                        main_color = "#ff4655"
+                    else:
+                        main_color = "#aaaaaa"
+
+                    # Map Bild laden
+                    map_img_path = get_map_img(row['Map'], 'list')
+                    b64_map = img_to_b64(map_img_path)
+                    map_bg_style = f"background-image: linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(18,18,18,1) 100%), url('data:image/png;base64,{b64_map}');" if b64_map else "background-color: #222;"
+
+                    # 2. STATS EXTRAHIEREN
+                    atk_w = int(row.get('Atk_R_W', 0)) if pd.notna(row.get('Atk_R_W')) else 0
+                    atk_l = int(row.get('Atk_R_L', 0)) if pd.notna(row.get('Atk_R_L')) else 0
+                    def_w = int(row.get('Def_R_W', 0)) if pd.notna(row.get('Def_R_W')) else 0
+                    def_l = int(row.get('Def_R_L', 0)) if pd.notna(row.get('Def_R_L')) else 0
+                    date_str = row['Date']
+
+                    # 3. AGENTEN ICONS GENERIEREN
+                    def get_agent_row_html(comp_prefix):
+                        html = ""
+                        for i in range(1, 6):
+                            an = row.get(f'{comp_prefix}_{i}')
+                            if pd.notna(an) and str(an) != "":
+                                b64 = img_to_b64(get_agent_img(an))
+                                if b64:
+                                    html += f"<img src='data:image/png;base64,{b64}' class='val-agent-img' title='{an}'>"
+                                else:
+                                    html += f"<div class='val-agent-img' style='background:#333' title='?'></div>"
+                            else:
+                                 html += f"<div class='val-agent-img' style='background:transparent; border:1px dashed #333'></div>"
+                        return html
+
+                    my_agents = get_agent_row_html('MyComp')
+                    en_agents = get_agent_row_html('EnComp')
+
+                    # 4. VOD LINK
+                    vod_link = row.get('VOD_Link')
+                    vod_html = ""
+                    if pd.notna(vod_link) and str(vod_link).startswith("http"):
+                        vod_html = f'<a href="{vod_link}" target="_blank" class="val-vod-link" style="color: {main_color};">WATCH VOD ↗</a>'
+
+                    # 5. HTML ZUSAMMENBAUEN
+                    html_card = f"""
+                    <div class="val-card">
+                        <div class="val-bar" style="background-color: {main_color};"></div>
+                        <div class="val-map-section">
+                            <div class="val-map-bg" style="{map_bg_style}"></div>
+                            <div class="val-map-text">
+                                <div class="val-map-name">{row['Map']}</div>
+                            </div>
+                        </div>
+                        <div class="val-comps-section">
+                            <div class="val-agent-row">
+                                <div class="val-team-label" style="color:#00ff80">US</div>
+                                {my_agents}
+                            </div>
+                            <div class="val-agent-row">
+                                <div class="val-team-label" style="color:#ff4655">EN</div>
+                                {en_agents}
+                            </div>
+                        </div>
+                        <div class="val-stats-section">
+                            <div class="stat-group">
+                                <div class="stat-label">ATTACK</div>
+                                <div class="stat-value" style="color:#ff99aa">{atk_w} - {atk_l}</div>
+                            </div>
+                            <div class="stat-group">
+                                <div class="stat-label">DEFENSE</div>
+                                <div class="stat-value" style="color:#99ffcc">{def_w} - {def_l}</div>
+                            </div>
+                            <div class="stat-group">
+                                <div class="stat-label">DATE</div>
+                                <div class="stat-date">{date_str}</div>
+                            </div>
+                        </div>
+                        <div class="val-score-section">
+                            <div class="val-score" style="color: {main_color};">{score_us} : {score_en}</div>
+                            {vod_html}
                         </div>
                     </div>
                     """
                     
-                    # Rendern ohne Zeilenumbrüche
-                    st.markdown(html_rank.replace("\n", " "), unsafe_allow_html=True)
+                    st.markdown(html_card.replace("\n", " "), unsafe_allow_html=True)
 
             else:
-                st.info("Noch keine Daten für das Ranking verfügbar.")
-            
-            # --- RECENT ---
-            st.divider()
-            st.markdown("### 📜 RECENT MATCHES")
-            matches_to_show = df_filt.sort_values('DateObj', ascending=False).head(5)
-            
-            for idx, row in matches_to_show.iterrows():
-                
-                # 1. DATEN VORBEREITEN
-                res = row['Result']
-                score_us = int(row['Score_Us'])
-                score_en = int(row['Score_Enemy'])
-                
-                # Farben setzen
-                if res == 'W':
-                    main_color = "#00ff80" 
-                elif res == 'L':
-                    main_color = "#ff4655"
-                else:
-                    main_color = "#aaaaaa"
-
-                # Map Bild laden
-                map_img_path = get_map_img(row['Map'], 'list')
-                b64_map = img_to_b64(map_img_path)
-                map_bg_style = f"background-image: linear-gradient(to right, rgba(0,0,0,0) 0%, rgba(18,18,18,1) 100%), url('data:image/png;base64,{b64_map}');" if b64_map else "background-color: #222;"
-
-                # 2. STATS EXTRAHIEREN
-                atk_w = int(row.get('Atk_R_W', 0)) if pd.notna(row.get('Atk_R_W')) else 0
-                atk_l = int(row.get('Atk_R_L', 0)) if pd.notna(row.get('Atk_R_L')) else 0
-                def_w = int(row.get('Def_R_W', 0)) if pd.notna(row.get('Def_R_W')) else 0
-                def_l = int(row.get('Def_R_L', 0)) if pd.notna(row.get('Def_R_L')) else 0
-                date_str = row['Date']
-
-                # 3. AGENTEN ICONS GENERIEREN
-                def get_agent_row_html(comp_prefix):
-                    html = ""
-                    for i in range(1, 6):
-                        an = row.get(f'{comp_prefix}_{i}')
-                        if pd.notna(an) and str(an) != "":
-                            b64 = img_to_b64(get_agent_img(an))
-                            if b64:
-                                html += f"<img src='data:image/png;base64,{b64}' class='val-agent-img' title='{an}'>"
-                            else:
-                                html += f"<div class='val-agent-img' style='background:#333' title='?'></div>"
-                        else:
-                             html += f"<div class='val-agent-img' style='background:transparent; border:1px dashed #333'></div>"
-                    return html
-
-                my_agents = get_agent_row_html('MyComp')
-                en_agents = get_agent_row_html('EnComp')
-
-                # 4. VOD LINK
-                vod_link = row.get('VOD_Link')
-                vod_html = ""
-                if pd.notna(vod_link) and str(vod_link).startswith("http"):
-                    vod_html = f'<a href="{vod_link}" target="_blank" class="val-vod-link" style="color: {main_color};">WATCH VOD ↗</a>'
-
-                # 5. HTML ZUSAMMENBAUEN
-                html_card = f"""
-                <div class="val-card">
-                    <div class="val-bar" style="background-color: {main_color};"></div>
-                    <div class="val-map-section">
-                        <div class="val-map-bg" style="{map_bg_style}"></div>
-                        <div class="val-map-text">
-                            <div class="val-map-name">{row['Map']}</div>
-                        </div>
-                    </div>
-                    <div class="val-comps-section">
-                        <div class="val-agent-row">
-                            <div class="val-team-label" style="color:#00ff80">US</div>
-                            {my_agents}
-                        </div>
-                        <div class="val-agent-row">
-                            <div class="val-team-label" style="color:#ff4655">EN</div>
-                            {en_agents}
-                        </div>
-                    </div>
-                    <div class="val-stats-section">
-                        <div class="stat-group">
-                            <div class="stat-label">ATTACK</div>
-                            <div class="stat-value" style="color:#ff99aa">{atk_w} - {atk_l}</div>
-                        </div>
-                        <div class="stat-group">
-                            <div class="stat-label">DEFENSE</div>
-                            <div class="stat-value" style="color:#99ffcc">{def_w} - {def_l}</div>
-                        </div>
-                        <div class="stat-group">
-                            <div class="stat-label">DATE</div>
-                            <div class="stat-date">{date_str}</div>
-                        </div>
-                    </div>
-                    <div class="val-score-section">
-                        <div class="val-score" style="color: {main_color};">{score_us} : {score_en}</div>
-                        {vod_html}
-                    </div>
-                </div>
-                """
-                
-                # HIER WAR DER FEHLER: Diese Zeile muss bündig mit 'html_card =' sein
-                st.markdown(html_card.replace("\n", " "), unsafe_allow_html=True)
+                st.info("No matches found for the selected date range.")
+        else:
+            st.info("No match data available. Please import matches in the 'Match Entry' tab.")
 
 # ==============================================================================
 # 👥 COACHING
@@ -1246,16 +1516,16 @@ elif page == "👥 COACHING":
         with tab3:
             st.markdown("### 📊 Player Overview")
             
-            players =  ["Luggi","Benni","Andrei","Luca","Sofi","Remus"],
+            players =  ["Luggi","Benni","Andrei","Luca","Sofi","Remus"]
             
             for player in players:
                 with st.expander(f"🎮 {player}", expanded=False):
                     col1, col2, col3 = st.columns(3)
                     
                     # Task stats
-                    player_todos = df_todos[df_todos['Player'] == player] if not df_todos.empty else pd.DataFrame()
-                    completed_tasks = len(player_todos[player_todos['Completed'] == True]) if not player_todos.empty else 0
-                    total_tasks = len(player_todos) if not player_todos.empty else 0
+                    player_todos = df_todos[df_todos['Player'] == player]
+                    completed_tasks = len(player_todos[player_todos['Completed'] == True])
+                    total_tasks = len(player_todos)
                     
                     with col1:
                         st.metric("Tasks Completed", f"{completed_tasks}/{total_tasks}")
@@ -1265,8 +1535,8 @@ elif page == "👥 COACHING":
                             st.caption(f"{completion_rate}% completion rate")
                     
                     # Message stats
-                    player_messages = df_messages[df_messages['ToUser'] == player] if not df_messages.empty else pd.DataFrame()
-                    unread_messages = len(player_messages[player_messages['Read'] == False]) if not player_messages.empty else 0
+                    player_messages = df_messages[df_messages['ToUser'] == player]
+                    unread_messages = len(player_messages[player_messages['Read'] == False])
                     
                     with col2:
                         st.metric("Unread Messages", unread_messages)
@@ -1276,8 +1546,8 @@ elif page == "👥 COACHING":
                             st.success("All messages read")
                     
                     # Scrim availability
-                    player_availability = df_availability[df_availability['Player'] == player] if not df_availability.empty else pd.DataFrame()
-                    available_count = len(player_availability[player_availability['Available'] == 'Yes']) if not player_availability.empty else 0
+                    player_availability = df_availability[df_availability['Player'] == player]
+                    available_count = len(player_availability[player_availability['Available'] == 'Yes'])
                     total_scrims = len(df_scrims) if not df_scrims.empty else 0
                     
                     with col3:
@@ -1292,9 +1562,9 @@ elif page == "👥 COACHING":
         # Player view - see their own tasks and messages
         
         # Check for notifications
-        player_todos = df_todos[(df_todos['Player'] == current_user) & (df_todos['Completed'] == False)] if not df_todos.empty else pd.DataFrame()
+        player_todos = df_todos[(df_todos['Player'] == current_user) & (df_todos['Completed'] == False)]
         incomplete_todos = len(player_todos)
-        player_messages = df_messages[(df_messages['ToUser'] == current_user) & (df_messages['Read'] == False)] if not df_messages.empty else pd.DataFrame()
+        player_messages = df_messages[(df_messages['ToUser'] == current_user) & (df_messages['Read'] == False)]
         unread_messages = len(player_messages)
         
         # Load playbooks for linking
@@ -1402,7 +1672,7 @@ elif page == "👥 COACHING":
                     chat_messages = df_messages[
                         ((df_messages['FromUser'] == current_user) & (df_messages['ToUser'] == selected_coach)) |
                         ((df_messages['FromUser'] == selected_coach) & (df_messages['ToUser'] == current_user))
-                    ].sort_values('SentAt') if not df_messages.empty else pd.DataFrame()
+                    ].sort_values('SentAt')
                     
                     # Chat container
                     chat_container = st.container(height=400)
@@ -1447,212 +1717,115 @@ elif page == "👥 COACHING":
 elif page == "⚽ SCRIMS":
     st.title("⚽ SCRIM SCHEDULER")
     
-    # Get current user info
     current_user = st.session_state.get('username', '')
     user_role = st.session_state.get('role', '')
     
-    tab1, tab2 = st.tabs(["📅 View Scrims", "➕ Create Scrim"])
+    tabs = ["📅 View Scrims"]
+    if user_role == 'coach':
+        tabs.append("➕ Create Scrim")
+    
+    tab1, *other_tabs = st.tabs(tabs)
     
     with tab1:
-        if user_role in ['player', 'coach']:
-            # Player/Couch view - compact overview
-            st.markdown("### 📅 Your Scrim Overview")
+        st.markdown("### 📅 Upcoming Scrims")
+        if df_scrims.empty:
+            st.info("No scrims scheduled yet.")
+        else:
+            df_scrims_sorted = df_scrims[df_scrims['DateTimeObj'] >= pd.Timestamp.now()].sort_values('DateTimeObj', ascending=True)
+            if df_scrims_sorted.empty:
+                st.info("No upcoming scrims. Check the 'Create Scrim' tab to schedule one.")
             
-            if df_scrims.empty:
-                st.info("No scrims scheduled yet.")
-            else:
-                # Sort by date/time
-                df_scrims_sorted = df_scrims.sort_values('DateTimeObj', ascending=True)
-                
-                # Summary stats
-                total_scrims = len(df_scrims_sorted)
-                upcoming_scrims = len(df_scrims_sorted[df_scrims_sorted['DateTimeObj'] >= pd.Timestamp.now()])
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Scrims", total_scrims)
-                with col2:
-                    st.metric("Upcoming", upcoming_scrims)
-                with col3:
-                    # Calculate user's availability rate
-                    if not df_availability.empty:
-                        user_responses = len(df_availability[df_availability['Player'] == current_user])
-                        user_available = len(df_availability[(df_availability['Player'] == current_user) & (df_availability['Available'] == 'Yes')])
-                        if user_responses > 0:
-                            availability_rate = int((user_available / user_responses) * 100)
-                            st.metric("Your Availability", f"{availability_rate}%")
-                        else:
-                            st.metric("Your Availability", "0%")
-                    else:
-                        st.metric("Your Availability", "0%")
+            for _, scrim in df_scrims_sorted.iterrows():
+                scrim_id = scrim['ID']
+                with st.container(border=True):
+                    c1, c2 = st.columns([1, 2.5])
+                    with c1:
+                        map_img = get_map_img(scrim.get('Map'), 'list')
+                        if map_img: st.image(map_img)
+                        else: st.markdown(f"**🗺️ {scrim.get('Map', 'N/A')}**")
+                    
+                    with c2:
+                        st.markdown(f"#### {scrim['Title']}")
+                        st.caption(f"🗓️ {scrim['Date']} at {scrim['Time']} | Created by {scrim['CreatedBy']}")
+                        if pd.notna(scrim.get('Description')) and scrim['Description']:
+                            st.markdown(f"> _{scrim['Description']}_")
+                        
+                        # Links
+                        l1, l2 = st.columns(2)
+                        pb_link = scrim.get('PlaybookLink')
+                        if pd.notna(pb_link) and pb_link and pb_link != "None":
+                            if st.button(f"📖 Open Playbook", key=f"pb_{scrim_id}", use_container_width=True):
+                                if pb_link.startswith("Team: "):
+                                    pb_name = pb_link.replace("Team: ", "")
+                                    pb_id = df_team_pb[df_team_pb['Name'] == pb_name].iloc[0]['ID']
+                                    st.session_state['sel_pb_id'] = pb_id
+                                    st.session_state['trigger_navigation'] = "📘 STRATEGY BOARD"
+                                    st.rerun()
+                        
+                        vid_link = scrim.get('VideoLink')
+                        if pd.notna(vid_link) and vid_link:
+                            l2.link_button("📺 Watch Video", vid_link, use_container_width=True)
+
+                        st.markdown("---")
+                        
+                        # Availability
+                        avail_data = df_availability[df_availability['ScrimID'] == scrim_id]
+                        available_players = avail_data[avail_data['Available'] == 'Yes']['Player'].tolist()
+                        
+                        st.markdown(f"**Availability ({len(available_players)}/{len(OUR_TEAM)})**")
+                        st.progress(len(available_players) / len(OUR_TEAM) if OUR_TEAM else 0, text=f"{', '.join(available_players) if available_players else 'None'}")
+
+                        # Player actions
+                        if user_role != 'coach':
+                            st.caption("Your Status:")
+                            b1, b2, b3 = st.columns(3)
+                            if b1.button("✅ Yes", key=f"yes_{scrim_id}", use_container_width=True): update_availability(scrim_id, current_user, "Yes"); st.rerun()
+                            if b2.button("🤔 Maybe", key=f"maybe_{scrim_id}", use_container_width=True): update_availability(scrim_id, current_user, "Maybe"); st.rerun()
+                            if b3.button("❌ No", key=f"no_{scrim_id}", use_container_width=True): update_availability(scrim_id, current_user, "No"); st.rerun()
+                        
+                        # Coach actions
+                        if user_role == 'coach':
+                            if st.button("🗑️ Delete Scrim", key=f"del_{scrim_id}", use_container_width=True):
+                                delete_scrim(scrim_id); st.rerun()
+
+    if user_role == 'coach':
+        with other_tabs[0]:
+            st.markdown("### ➕ Create New Scrim")
+            with st.form("create_scrim"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    title = st.text_input("Scrim Title", placeholder="e.g., Weekly Scrim vs Team X")
+                    date = st.date_input("Date", min_value=datetime.today().date())
+                    time = st.time_input("Time")
+                with c2:
+                    map_name = st.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"])
+                    description = st.text_area("Description", placeholder="e.g., Focus on B-Site retakes")
                 
                 st.markdown("---")
-                
-                # Scrim overview table
-                st.markdown("### 🎯 Scrim Status")
-                
-                # Initialize session state for instant updates
-                if 'availability_updates' not in st.session_state:
-                    st.session_state.availability_updates = {}
-                
-                for _, scrim in df_scrims_sorted.iterrows():
-                    scrim_id = scrim['ID']
-                    availability_data = df_availability[df_availability['ScrimID'] == scrim_id] if not df_availability.empty else pd.DataFrame()
-                    
-                    # Check for instant updates from session state
-                    instant_status = st.session_state.availability_updates.get(scrim_id)
-                    
-                    # Get user's current status (prefer instant update over database)
-                    user_status = instant_status if instant_status else "Not Responded"
-                    if not instant_status and not availability_data.empty:
-                        user_availability = availability_data[availability_data['Player'] == current_user]
-                        if not user_availability.empty:
-                            user_status = user_availability['Available'].iloc[0]
-                    
-                    # Calculate availability stats (include instant updates)
-                    if not availability_data.empty:
-                        available_count = len(availability_data[availability_data['Available'] == 'Yes'])
-                        total_responses = len(availability_data)
-                        # Add instant update to count if it exists
-                        if instant_status == 'Yes':
-                            available_count += 1
-                            if user_status == "Not Responded":  # New response
-                                total_responses += 1
-                        elif instant_status and instant_status != "Not Responded":
-                            total_responses += 1  # New response but not available
-                        availability_text = f"{available_count}/{total_responses} available"
+                st.markdown("##### Optional Links")
+                c3, c4 = st.columns(2)
+                with c3:
+                    all_playbooks = ["None"]
+                    if not df_team_pb.empty: all_playbooks.extend([f"Team: {pb}" for pb in df_team_pb.get('Name', [])])
+                    if not df_legacy_pb.empty: all_playbooks.extend([f"Legacy: {pb}" for pb in df_legacy_pb.get('Name', [])])
+                    playbook_link = st.selectbox("Link Playbook", all_playbooks)
+                with c4:
+                    video_link = st.text_input("Video Link (VOD, YouTube, etc.)")
+
+                if st.form_submit_button("Create Scrim", type="primary", use_container_width=True):
+                    if not title: st.error("Please enter a scrim title.")
                     else:
-                        availability_text = "No responses yet"
-                        if instant_status and instant_status != "Not Responded":
-                            availability_text = f"1/1 available" if instant_status == 'Yes' else "0/1 available"
-                    
-                    # Status color coding
-                    status_color = {
-                        "Yes": "🟢",
-                        "No": "🔴", 
-                        "Maybe": "🟡",
-                        "Not Responded": "⚪"
-                    }.get(user_status, "⚪")
-                    
-                    # Create card for each scrim
-                    with st.container():
-                        col1, col2, col3, col4 = st.columns([3, 2, 2, 3])
-                        
-                        with col1:
-                            st.markdown(f"**{scrim['Title']}**")
-                            st.caption(f"{scrim['Date']} at {scrim['Time']}")
-                            if 'Map' in scrim and pd.notna(scrim['Map']):
-                                st.caption(f"🗺️ {scrim['Map']}")
-                        
-                        with col2:
-                            st.markdown(f"{status_color} **{user_status}**")
-                        
-                        with col3:
-                            st.caption(availability_text)
-                        
-                        with col4:
-                            if user_role == 'coach':
-                                # Coach controls
-                                st.markdown("**Coach Controls:**")
-                                del_col1, del_col2 = st.columns(2)
-                                with del_col1:
-                                    if st.button("🗑️ Delete", key=f"delete_{scrim_id}", 
-                                                help="Delete this scrim"):
-                                        delete_scrim(scrim_id)
-                                        st.rerun()
-                                with del_col2:
-                                    st.caption("⚙️ Manage")
-                            else:
-                                # Player buttons
-                                btn_col1, btn_col2, btn_col3 = st.columns(3)
-                                with btn_col1:
-                                    if st.button("✅", key=f"quick_yes_{scrim_id}", help="Mark as Available"):
-                                        st.session_state.availability_updates[scrim_id] = "Yes"
-                                        update_availability(scrim_id, current_user, "Yes")
-                                with btn_col2:
-                                    if st.button("❌", key=f"quick_no_{scrim_id}", help="Mark as Not Available"):
-                                        st.session_state.availability_updates[scrim_id] = "No"
-                                        update_availability(scrim_id, current_user, "No")
-                                with btn_col3:
-                                    if st.button("🤔", key=f"quick_maybe_{scrim_id}", help="Mark as Maybe"):
-                                        st.session_state.availability_updates[scrim_id] = "Maybe"
-                                        update_availability(scrim_id, current_user, "Maybe")
-                    
-                    st.markdown("---")
-        
-        else:
-            # Visitor view - limited info
-            st.markdown("### 📅 Upcoming Scrims")
-            
-            if df_scrims.empty:
-                st.info("No scrims scheduled yet.")
-            else:
-                df_scrims_sorted = df_scrims.sort_values('DateTimeObj', ascending=True)
-                
-                for _, scrim in df_scrims_sorted.iterrows():
-                    with st.expander(f"⚽ {scrim['Title']} - {scrim['Date']} {scrim['Time']}", expanded=False):
-                        col1, col2 = st.columns([2, 1])
-                        
-                        with col1:
-                            st.markdown(f"**Date:** {scrim['Date']}")
-                            st.markdown(f"**Time:** {scrim['Time']}")
-                            st.markdown(f"**Description:** {scrim['Description']}")
-                            st.markdown(f"**Created by:** {scrim['CreatedBy']}")
-                            
-                            # Show availability status
-                            scrim_id = scrim['ID']
-                            availability_data = df_availability[df_availability['ScrimID'] == scrim_id] if not df_availability.empty else pd.DataFrame()
-                            
-                            if not availability_data.empty:
-                                available_count = len(availability_data[availability_data['Available'] == 'Yes'])
-                                total_responses = len(availability_data)
-                                st.markdown(f"**Availability:** {available_count}/{total_responses} players available")
-                            else:
-                                st.markdown("**Availability:** No responses yet")
-                        
-                        with col2:
-                            st.info("Login as a player to mark your availability")
-    
-    with tab2:
-        # Only coaches can create scrims
-        if user_role != 'coach':
-            st.warning("Only coaches can create scrims.")
-        else:
-            st.markdown("### ➕ Create New Scrim")
-            
-            with st.form("create_scrim"):
-                title = st.text_input("Scrim Title", placeholder="e.g., Weekly Scrim vs Team X")
-                date = st.date_input("Date", min_value=datetime.today().date())
-                time = st.time_input("Time")
-                map_name = st.selectbox("Map", [
-                    "Ascent", "Bind", "Breeze", "Fracture", "Haven", "Lotus", "Pearl", "Split", "Sunset", "Abyss"
-                ], placeholder="Select a map...")
-                description = st.text_area("Description", placeholder="Additional details about the scrim...")
-                
-                submitted = st.form_submit_button("Create Scrim")
-                
-                if submitted:
-                    if not title:
-                        st.error("Please enter a scrim title.")
-                    else:
-                        # Create new scrim
                         scrim_id = str(uuid.uuid4())[:8]
                         new_scrim = {
-                            'ID': scrim_id,
-                            'Title': title,
-                            'Date': date.strftime("%Y-%m-%d"),
-                            'Time': time.strftime("%H:%M"),
-                            'Map': map_name,
-                            'Description': description,
-                            'CreatedBy': current_user,
-                            'CreatedAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            'ID': scrim_id, 'Title': title, 'Date': date.strftime("%Y-%m-%d"),
+                            'Time': time.strftime("%H:%M"), 'Map': map_name, 'Description': description,
+                            'CreatedBy': current_user, 'CreatedAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            'PlaybookLink': playbook_link if playbook_link != "None" else "",
+                            'VideoLink': video_link
                         }
-                        
-                        # Save to CSV
                         updated = pd.concat([df_scrims, pd.DataFrame([new_scrim])], ignore_index=True)
                         save_scrims(updated)
-                        st.success(f"Scrim '{title}' created successfully!")
-                        st.rerun()
+                        st.success(f"Scrim '{title}' created!"); st.rerun()
 
 # ==============================================================================
 # 2. MATCH ENTRY (AUTO PLAYER STATS)
@@ -1667,6 +1840,7 @@ elif page == "📝 MATCH ENTRY":
             try:
                 data = json.load(up); meta = data['data']['metadata']; segs = data['data']['segments']
                 mid = meta.get('matchId', f"J_{int(datetime.now().timestamp())}")
+                mid = meta.get('matchId') or data['data'].get('attributes', {}).get('id') or f"J_{int(datetime.now().timestamp())}"
                 
                 my_tid = None
                 # Team ID
@@ -1681,6 +1855,12 @@ elif page == "📝 MATCH ENTRY":
                         if s['type']=='round-summary':
                             w = s.get('attributes',{}).get('winningTeamId') or s.get('metadata',{}).get('winningTeamId')
                             if w: (rw:=rw+1) if w==my_tid else (rl:=rl+1)
+                            w = s.get('attributes',{}).get('winningTeamId') or \
+                                s.get('metadata',{}).get('winningTeamId') or \
+                                s.get('stats',{}).get('winningTeam',{}).get('value')
+                            if w: 
+                                if w==my_tid: rw+=1 
+                                else: rl+=1
                         
                         if s['type']=='player-summary':
                             ag = s['metadata']['agentName']; name = s['attributes']['platformUserIdentifier']
@@ -1694,9 +1874,11 @@ elif page == "📝 MATCH ENTRY":
                                 p_stats.append({
                                     'MatchID': mid, 'Date': datetime.today().strftime("%d.%m.%Y"),
                                     'Map': meta.get('mapName'), 'Player': name.split('#')[0], 'Agent': ag,
-                                    'Kills': sts['kills']['value'], 'Deaths': sts['deaths']['value'],
-                                    'Assists': sts['assists']['value'], 'Score': sts['score']['value'], 'Rounds': rounds,
-                                    'HS': sts.get('headshotsPercentage', {}).get('value', 0)
+                                    'Kills': sts.get('kills', {}).get('value', 0),
+                                    'Deaths': sts.get('deaths', {}).get('value', 0),
+                                    'Assists': sts.get('assists', {}).get('value', 0),
+                                    'Score': sts.get('score', {}).get('value', 0), 'Rounds': rounds,
+                                    'HS': sts.get('hsAccuracy', {}).get('value', 0)
                                 })
 
                         if s['type']=='player-round-kills':
@@ -1769,10 +1951,17 @@ elif page == "📝 MATCH ENTRY":
 elif page == "🗺️ MAP ANALYZER":
     st.title("TACTICAL BOARD")
     if not df.empty:
-        sel_map = st.selectbox("MAP:", sorted(df['Map'].unique()))
+        # --- VISUAL MAP SELECTOR ---
+        if 'ana_map' not in st.session_state: 
+            st.session_state.ana_map = sorted(df['Map'].unique())[0] if not df.empty else "Ascent"
+        
+        with st.expander("🗺️ SELECT MAP", expanded=True):
+            render_visual_selection(sorted(df['Map'].unique()), 'map', 'ana_sel', multi=False, key_state='ana_map')
+        
+        sel_map = st.session_state.ana_map
         m_df = df[df['Map'] == sel_map]
         head = get_map_img(sel_map, 'list'); 
-        if head: st.image(head, width='stretch')
+        if head: st.image(head, use_container_width=True)
         
         wins = len(m_df[m_df['Result']=='W']); g = len(m_df)
         aw = m_df['Atk_R_W'].sum(); al = m_df['Atk_R_L'].sum()
@@ -1966,7 +2155,7 @@ elif page == "📘 STRATEGY BOARD":
                         with c_img:
                             st.subheader(f"📍 {strat['Name']}")
                             spath = os.path.join(STRAT_IMG_DIR, strat['Image'])
-                            if os.path.exists(spath): st.image(spath, width='stretch')
+                            if os.path.exists(spath): st.image(spath, use_container_width=True)
                         with c_proto:
                             st.markdown("### ⚡ PROTOCOLS")
                             try: protos = json.loads(strat['Protocols'])
@@ -1995,18 +2184,20 @@ elif page == "📘 STRATEGY BOARD":
     with tab_whiteboard:
         st.subheader("TACTICAL BOARD")
         
-        # Map selection
-        wb_map = st.selectbox("Select Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"])
-        
-        # Agent Icons Referenz
-        st.caption("Agent Referenz (für Kreise):")
+        # --- VISUAL MAP SELECTOR ---
+        if 'wb_map_sel' not in st.session_state: st.session_state.wb_map_sel = "Ascent"
+        with st.expander("🗺️ MAP SELECTION", expanded=False):
+            render_visual_selection(sorted(df['Map'].unique()) if not df.empty else ["Ascent"], 'map', 'wb_m', multi=False, key_state='wb_map_sel')
+        wb_map = st.session_state.wb_map_sel
+
+        # --- VISUAL AGENT SELECTOR ---
         agent_files = glob.glob(os.path.join(ASSET_DIR, "agents", "*.png"))
-        if agent_files:
-            st.image([Image.open(x) for x in agent_files], width=20)
-        
-        # Agent Auswahl für Platzierung
         agent_options = [os.path.basename(x).replace('.png', '') for x in agent_files] if agent_files else []
-        selected_agent = st.selectbox("Agent für Platzierung:", agent_options, key="selected_agent") if agent_options else None
+        
+        if 'wb_agent_sel' not in st.session_state: st.session_state.wb_agent_sel = agent_options[0] if agent_options else None
+        with st.expander("♟️ AGENT ICON (for placement)", expanded=False):
+             render_visual_selection(agent_options, 'agent', 'wb_a', multi=False, key_state='wb_agent_sel')
+        selected_agent = st.session_state.wb_agent_sel
         
         st.divider()
         
@@ -2181,7 +2372,7 @@ elif page == "📘 STRATEGY BOARD":
                 with c_upl:
                     if curr_img:
                         p = os.path.join(STRAT_IMG_DIR, curr_img)
-                        if os.path.exists(p): st.image(p, caption="Current Reference", width='stretch')
+                        if os.path.exists(p): st.image(p, caption="Current Reference", use_container_width=True)
                     new_img = st.file_uploader(f"Upload {sec_name} Image", type=['png', 'jpg'], key=f"up_{theory_map}_{sec_name}")
                 if st.button(f"Save {sec_name}", key=f"sv_{theory_map}_{sec_name}"):
                     save_theory_data_gsheet(theory_map, sec_name, new_txt, new_img, curr_img)
@@ -2320,32 +2511,376 @@ elif page == "📅 CALENDAR":
                 st.success("Saved")
 
 # ==============================================================================
-# 7. PLAYERS
+# 7. PLAYERS (KOMPLETT NEU MIT DEEP DIVE)
 # ==============================================================================
 elif page == "📊 PLAYERS":
     st.title("PLAYER PERFORMANCE")
-    if not df_players.empty:
-        p_agg = df_players.groupby('Player').agg({
-            'MatchID': 'count',
-            'Kills': 'sum', 'Deaths': 'sum', 'Assists': 'sum', 'Score': 'sum', 'Rounds': 'sum',
-            'HS': 'mean'
-        }).reset_index()
-        p_agg['SafeDeaths'] = p_agg['Deaths'].replace(0, 1)
-        p_agg['KD'] = p_agg['Kills'] / p_agg['SafeDeaths']
-        p_agg['ACS'] = p_agg['Score'] / p_agg['Rounds']
-        p_agg = p_agg.rename(columns={'MatchID': 'Matches'})
+
+    # Styling Functions for Conditional Formatting (moved here to be available for all tabs)
+    def style_good_bad(v, good_thresh, bad_thresh, inverse=False):
+        if pd.isna(v): return ""
+        # Colors: Dark Green / Dark Yellow / Dark Red backgrounds with light text
+        c_good = 'background-color: #113321; color: #aaffaa'
+        c_avg = 'background-color: #443311; color: #ffffaa'
+        c_bad = 'background-color: #441111; color: #ffaaaa'
         
-        st.dataframe(
-            p_agg[['Player', 'Matches', 'KD', 'ACS', 'HS', 'Kills']],
-            column_config={
-                "KD": st.column_config.ProgressColumn("K/D", format="%.2f", min_value=0, max_value=3),
-                "ACS": st.column_config.NumberColumn("ACS", format="%.0f"),
-                "HS": st.column_config.NumberColumn("HS%", format="%.1f%%")
-            },
-            width='stretch', hide_index=True
-        )
-        st.caption("Stats based on imported JSONs.")
-    else: st.info("No player stats yet. Import JSON matches to see data.")
+        if inverse: # Lower is better (e.g. Deaths)
+            if v <= good_thresh: return c_good
+            elif v <= bad_thresh: return c_avg
+            else: return c_bad
+        else: # Higher is better
+            if v >= good_thresh: return c_good
+            elif v >= bad_thresh: return c_avg
+            else: return c_bad
+
+    # TABS ERSTELLEN
+    tab_overview, tab_deep = st.tabs(["📊 TEAM OVERVIEW", "🧬 DEEP DIVE ANALYZER"])
+    
+    # --------------------------------------------------------------------------
+    # TAB 1: TEAM OVERVIEW (Der alte Code)
+    # --------------------------------------------------------------------------
+    with tab_overview:
+        if df_players.empty:
+            st.info("No player stats yet. Import JSON matches to see data.")
+        else:
+            # --- 1. FILTER SECTION ---
+            st.markdown("### 🔎 FILTER")
+            
+            # Get unique values for filters
+            available_maps = sorted(df_players['Map'].unique())
+            available_agents = sorted(df_players['Agent'].unique())
+            available_players = sorted(df_players['Player'].unique())
+            
+            # Determine default players
+            default_players = [p for p in available_players if any(t.lower() in p.lower() for t in OUR_TEAM)]
+            if not default_players: default_players = available_players
+
+            # --- VISUAL FILTERS ---
+            with st.expander("🗺️ MAPS & ♟️ AGENTS FILTER", expanded=False):
+                st.caption("Select Maps:")
+                sel_maps = render_visual_selection(available_maps, 'map', 'p_map_flt', default=available_maps, multi=True)
+                st.divider()
+                st.caption("Select Agents:")
+                sel_agents = render_visual_selection(available_agents, 'agent', 'p_ag_flt', default=available_agents, multi=True)
+
+            # Player filter
+            sel_players = st.multiselect("Select Players:", available_players, default=default_players)
+
+            # --- 2. DATA PROCESSING ---
+            df_filtered = df_players.copy()
+            
+            if sel_maps:
+                df_filtered = df_filtered[df_filtered['Map'].isin(sel_maps)]
+            if sel_agents:
+                df_filtered = df_filtered[df_filtered['Agent'].isin(sel_agents)]
+            if sel_players:
+                df_filtered = df_filtered[df_filtered['Player'].isin(sel_players)]
+                
+            if df_filtered.empty:
+                st.warning("No data matches your filters.")
+            else:
+                # Aggregate Data
+                p_agg = df_filtered.groupby('Player').agg({
+                    'MatchID': 'nunique', 
+                    'Kills': 'sum', 
+                    'Deaths': 'sum', 
+                    'Assists': 'sum', 
+                    'Score': 'sum', 
+                    'Rounds': 'sum',
+                    'HS': 'mean' 
+                }).reset_index()
+                
+                # Calculate Metrics
+                p_agg['SafeDeaths'] = p_agg['Deaths'].replace(0, 1)
+                p_agg['KD'] = p_agg['Kills'] / p_agg['SafeDeaths']
+                p_agg['ACS'] = p_agg['Score'] / p_agg['Rounds'].replace(0, 1)
+                p_agg['KPR'] = p_agg['Kills'] / p_agg['Rounds'].replace(0, 1)
+                p_agg['APR'] = p_agg['Assists'] / p_agg['Rounds'].replace(0, 1)
+                p_agg['DPR'] = p_agg['Deaths'] / p_agg['Rounds'].replace(0, 1)
+                
+                p_display = p_agg.rename(columns={'MatchID': 'Matches'})
+                
+                # --- 3. TABLE VIEW ---
+                st.divider()
+                st.markdown("### 📋 STATS OVERVIEW")
+                
+                # Styling Functions
+                def style_good_bad(v, good_thresh, bad_thresh, inverse=False):
+                    if pd.isna(v): return ""
+                    c_good = 'background-color: #113321; color: #aaffaa'
+                    c_avg = 'background-color: #443311; color: #ffffaa'
+                    c_bad = 'background-color: #441111; color: #ffaaaa'
+                    
+                    if inverse: 
+                        if v <= good_thresh: return c_good
+                        elif v <= bad_thresh: return c_avg
+                        else: return c_bad
+                    else: 
+                        if v >= good_thresh: return c_good
+                        elif v >= bad_thresh: return c_avg
+                        else: return c_bad
+
+                # Apply Pandas Styling
+                styler = p_display[['Player', 'Matches', 'KD', 'ACS', 'HS', 'KPR', 'APR', 'DPR']].style\
+                    .format({"KD": "{:.2f}", "ACS": "{:.0f}", "HS": "{:.1f}%", "KPR": "{:.2f}", "APR": "{:.2f}", "DPR": "{:.2f}"})\
+                    .map(lambda v: style_good_bad(v, 1.2, 0.9), subset=['KD'])\
+                    .map(lambda v: style_good_bad(v, 230, 180), subset=['ACS'])\
+                    .map(lambda v: style_good_bad(v, 25, 15), subset=['HS'])\
+                    .map(lambda v: style_good_bad(v, 0.8, 0.6), subset=['KPR'])\
+                    .map(lambda v: style_good_bad(v, 0.65, 0.80, inverse=True), subset=['DPR'])
+
+                st.dataframe(
+                    styler,
+                    column_config={
+                        "Player": st.column_config.TextColumn("Player", width="medium"),
+                        "Matches": st.column_config.NumberColumn("Matches", format="%d"),
+                        "KD": st.column_config.NumberColumn("K/D"),
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+                # --- 4. SPIDER CHART ---
+                st.divider()
+                st.markdown("### 🕸️ TRAIT ANALYSIS")
+                
+                c_chart, c_metrics = st.columns([1.5, 1])
+                player_list = p_agg['Player'].tolist()
+                
+                with c_metrics:
+                    st.markdown("#### Compare Players")
+                    p1_name = st.selectbox("Player 1 (Blue)", player_list, index=0 if len(player_list)>0 else None)
+                    p2_name = st.selectbox("Player 2 (Pink)", ["None"] + player_list, index=1 if len(player_list)>1 else 0)
+                    
+                    if p1_name:
+                        row1 = p_agg[p_agg['Player'] == p1_name].iloc[0]
+                        
+                        def show_metric_comp(label, val1, val2=None, fmt="{:.2f}"):
+                            delta = None
+                            if val2 is not None: delta = val1 - val2
+                            st.metric(label, fmt.format(val1), f"{delta:.2f}" if delta is not None else None)
+
+                        if p2_name and p2_name != "None":
+                            row2 = p_agg[p_agg['Player'] == p2_name].iloc[0]
+                            st.markdown("---")
+                            c_m1, c_m2 = st.columns(2)
+                            with c_m1: show_metric_comp("K/D", row1['KD'], row2['KD'])
+                            with c_m2: show_metric_comp("ACS", row1['ACS'], row2['ACS'], "{:.0f}")
+                            c_m3, c_m4 = st.columns(2)
+                            with c_m3: show_metric_comp("KPR", row1['KPR'], row2['KPR'])
+                            with c_m4: show_metric_comp("HS%", row1['HS'], row2['HS'], "{:.1f}%")
+                        else:
+                            st.markdown("---")
+                            c_m1, c_m2 = st.columns(2)
+                            with c_m1: st.metric("K/D", f"{row1['KD']:.2f}")
+                            with c_m2: st.metric("ACS", f"{row1['ACS']:.0f}")
+                            c_m3, c_m4 = st.columns(2)
+                            with c_m3: st.metric("KPR", f"{row1['KPR']:.2f}")
+                            with c_m4: st.metric("HS%", f"{row1['HS']:.1f}%")
+
+                with c_chart:
+                    if p1_name:
+                        categories = ['K/D', 'ACS', 'HS%', 'KPR', 'APR']
+                        max_values = {'K/D': 2.0, 'ACS': 300, 'HS%': 40, 'KPR': 1.0, 'APR': 0.5}
+                        radar_data = []
+                        
+                        def add_player_data(p_row, p_label):
+                            vals = {'K/D': p_row['KD'], 'ACS': p_row['ACS'], 'HS%': p_row['HS'], 'KPR': p_row['KPR'], 'APR': p_row['APR']}
+                            for cat in categories:
+                                norm = min(vals[cat] / max_values[cat], 1.0)
+                                radar_data.append({'Player': p_label, 'Metric': cat, 'Value': norm, 'Display': vals[cat]})
+                        
+                        add_player_data(row1, p1_name)
+                        if p2_name and p2_name != "None": add_player_data(row2, p2_name)
+                        
+                        fig = px.line_polar(pd.DataFrame(radar_data), r='Value', theta='Metric', color='Player', line_close=True,
+                                            color_discrete_sequence=['#00BFFF', '#FF1493'], hover_data={'Value': False, 'Display': True})
+                        fig.update_traces(fill='toself')
+                        fig.update_layout(polar=dict(radialaxis=dict(visible=False, range=[0, 1]), bgcolor='rgba(255,255,255,0.05)'),
+                                          paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='white'),
+                                          margin=dict(t=20, b=20, l=20, r=20), legend=dict(orientation="h", y=1.02))
+                        st.plotly_chart(fig, use_container_width=True)
+
+# --------------------------------------------------------------------------
+    # TAB 2: DEEP DIVE (MIT DIAGRAMMEN)
+    # --------------------------------------------------------------------------
+    with tab_deep:
+        # --- ABILITY MAPPING DATABASE ---
+        AGENT_ABILITIES = {
+            "Astra": {"C": "Gravity Well", "Q": "Nova Pulse", "E": "Nebula", "X": "Astral Form"},
+            "Breach": {"C": "Aftershock", "Q": "Flashpoint", "E": "Fault Line", "X": "Rolling Thunder"},
+            "Brimstone": {"C": "Stim Beacon", "Q": "Incendiary", "E": "Sky Smoke", "X": "Orbital Strike"},
+            "Chamber": {"C": "Trademark", "Q": "Headhunter", "E": "Rendezvous", "X": "Tour De Force"},
+            "Clove": {"C": "Pick-me-up", "Q": "Meddle", "E": "Ruse", "X": "Not Dead Yet"},
+            "Cypher": {"C": "Trapwire", "Q": "Cyber Cage", "E": "Spycam", "X": "Neural Theft"},
+            "Deadlock": {"C": "GravNet", "Q": "Sonic Sensor", "E": "Barrier Mesh", "X": "Annihilation"},
+            "Fade": {"C": "Prowler", "Q": "Seize", "E": "Haunt", "X": "Nightfall"},
+            "Gekko": {"C": "Mosh Pit", "Q": "Wingman", "E": "Dizzy", "X": "Thrash"},
+            "Harbor": {"C": "Cascade", "Q": "Cove", "E": "High Tide", "X": "Reckoning"},
+            "Iso": {"C": "Contingency", "Q": "Undercut", "E": "Double Tap", "X": "Kill Contract"},
+            "Jett": {"C": "Cloudburst", "Q": "Updraft", "E": "Tailwind", "X": "Blade Storm"},
+            "KAY/O": {"C": "FRAG/ment", "Q": "FLASH/drive", "E": "ZERO/point", "X": "NULL/cmd"},
+            "Killjoy": {"C": "Nanoswarm", "Q": "Alarmbot", "E": "Turret", "X": "Lockdown"},
+            "Neon": {"C": "Fast Lane", "Q": "Relay Bolt", "E": "High Gear", "X": "Overdrive"},
+            "Omen": {"C": "Shrouded Step", "Q": "Paranoia", "E": "Dark Cover", "X": "From the Shadows"},
+            "Phoenix": {"C": "Blaze", "Q": "Curveball", "E": "Hot Hands", "X": "Run it Back"},
+            "Raze": {"C": "Boom Bot", "Q": "Blast Pack", "E": "Paint Shells", "X": "Showstopper"},
+            "Reyna": {"C": "Leer", "Q": "Devour", "E": "Dismiss", "X": "Empress"},
+            "Sage": {"C": "Barrier Orb", "Q": "Slow Orb", "E": "Healing Orb", "X": "Resurrection"},
+            "Skye": {"C": "Regrowth", "Q": "Trailblazer", "E": "Guiding Light", "X": "Seekers"},
+            "Sova": {"C": "Owl Drone", "Q": "Shock Bolt", "E": "Recon Bolt", "X": "Hunter's Fury"},
+            "Viper": {"C": "Snake Bite", "Q": "Poison Cloud", "E": "Toxic Screen", "X": "Viper's Pit"},
+            "Vyse": {"C": "Razorvine", "Q": "Shear", "E": "Arc Rose", "X": "Steel Garden"},
+            "Yoru": {"C": "Fakeout", "Q": "Blindside", "E": "Gatecrash", "X": "Dimensional Drift"},
+        }
+
+        st.markdown("### 🧬 INDIVIDUAL PLAYER DEEP DIVE")
+        deep_player = st.selectbox("Select Player", ["Andrei", "Benni", "Luca", "Luggi", "Remus", "Sofi"])
+        
+        # Pfad laden
+        file_path = os.path.join(BASE_DIR, "data", "players", f"{deep_player.lower()}_data.json")
+        df_deep = pd.DataFrame()
+        
+        if os.path.exists(file_path):
+            st.success(f"📂 Analysing local data for **{deep_player}**")
+            df_deep = parse_tracker_json(file_path)
+        else:
+            up = st.file_uploader("Upload JSON", type=['json'])
+            if up: df_deep = parse_tracker_json(up)
+
+        # --- HIER BEGINNT DIE ANALYSE ---
+        if not df_deep.empty:
+            
+            if df_deep.empty:
+                st.warning(f"⚠️ Datei geladen, aber keine Daten für Spieler **{deep_player}** gefunden.")
+                st.stop()
+
+            # SICHERHEITS-CHECK: Sind die neuen Daten da?
+            if 'Cast_Ult' not in df_deep.columns:
+                st.error("⚠️ FEHLER: Dein Parser ist veraltet. Bitte führe SCHRITT 1 aus meiner Nachricht aus (Funktion parse_tracker_json aktualisieren).")
+                st.stop()
+
+            # 1. TOP STATS ROW
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("K/D RATIO", f"{df_deep['KD'].mean():.2f}")
+            k2.metric("HEADSHOT %", f"{df_deep['HS%'].mean():.1f}%")
+            k3.metric("ADR", f"{df_deep['ADR'].mean():.0f}")
+            k4.metric("UTIL PER MATCH", f"{df_deep['Total_Util'].mean():.1f}")
+            
+            st.divider()
+
+            # 2. AGENT BREAKDOWN (VLR.gg Style Table)
+            st.subheader("♟️ AGENT PERFORMANCE")
+            
+            # Daten aggregieren
+            ag_stats = df_deep.groupby('Agent').agg({
+                'MatchesPlayed': 'sum', 
+                'Kills': 'sum', 'Deaths': 'sum', 
+                'Wins': 'sum',
+                'HS%': 'mean',
+                'Cast_Grenade':'mean', 'Cast_Abil1':'mean', 'Cast_Abil2':'mean', 'Cast_Ult':'mean'
+            }).reset_index()
+            ag_stats['Win%'] = ag_stats['Wins'] / ag_stats['MatchesPlayed'] * 100
+            ag_stats['KD'] = ag_stats['Kills'] / ag_stats['Deaths'].replace(0,1)
+            
+            # Sortieren nach meisten Matches
+            ag_stats = ag_stats.sort_values('MatchesPlayed', ascending=False)
+            
+            # Tabelle vorbereiten
+            table_data = []
+            for _, row in ag_stats.iterrows():
+                agent_name = row['Agent']
+                # Bild laden und zu Base64 konvertieren für die Tabelle
+                img_path = get_agent_img(agent_name)
+                img_b64 = f"data:image/png;base64,{img_to_b64(img_path)}" if img_path else ""
+                
+                table_data.append({
+                    "Icon": img_b64,
+                    "Agent": agent_name,
+                    "Matches": int(row['MatchesPlayed']),
+                    "Win%": row['Win%'],
+                    "K/D": row['KD'],
+                    "HS%": row['HS%'],
+                    "C": row['Cast_Grenade'],
+                    "Q": row['Cast_Abil1'],
+                    "E": row['Cast_Abil2'],
+                    "X": row['Cast_Ult'],
+                })
+            
+            df_table = pd.DataFrame(table_data)
+            
+            # Apply Styling
+            styler = df_table.style\
+                .format({
+                    "Win%": "{:.0f}%", "K/D": "{:.2f}", "HS%": "{:.1f}%",
+                    "C": "{:.1f}", "Q": "{:.1f}", "E": "{:.1f}", "X": "{:.1f}"
+                })\
+                .map(lambda v: style_good_bad(v, 60, 45), subset=['Win%'])\
+                .map(lambda v: style_good_bad(v, 1.2, 0.9), subset=['K/D'])\
+                .map(lambda v: style_good_bad(v, 25, 15), subset=['HS%'])\
+                .background_gradient(cmap='Purples', subset=['C', 'Q', 'E', 'X'])
+
+            st.dataframe(
+                styler,
+                column_config={
+                    "Icon": st.column_config.ImageColumn("Icon", width="small"),
+                    "Agent": st.column_config.TextColumn("Agent", width="small"),
+                    "Matches": st.column_config.NumberColumn("#", format="%d", width="small"),
+                    "Win%": st.column_config.TextColumn("Win%"),
+                    "K/D": st.column_config.TextColumn("K/D"),
+                    "HS%": st.column_config.TextColumn("HS%"),
+                    "C": st.column_config.NumberColumn("C", help="Avg Casts per Match"),
+                    "Q": st.column_config.NumberColumn("Q", help="Avg Casts per Match"),
+                    "E": st.column_config.NumberColumn("E", help="Avg Casts per Match"),
+                    "X": st.column_config.NumberColumn("X", help="Avg Casts per Match"),
+                },
+                use_container_width=True,
+                hide_index=True,
+                height=400
+            )
+
+            with st.expander("Ability Key"):
+                for agent in df_table['Agent']:
+                    abils = AGENT_ABILITIES.get(agent, {})
+                    if abils:
+                        st.markdown(f"**{agent}:** C: *{abils.get('C')}*, Q: *{abils.get('Q')}*, E: *{abils.get('E')}*, X: *{abils.get('X')}*")
+
+            st.divider()
+
+            # 3. MAP UTILITY ANALYSIS
+            st.subheader("🗺️ MAP UTILITY DEEP DIVE")
+            
+            # Initialize session state for this selector
+            if 'deep_agent' not in st.session_state:
+                st.session_state.deep_agent = ag_stats['Agent'].unique()[0] if not ag_stats.empty else None
+
+            with st.expander("♟️ SELECT AGENT", expanded=True):
+                render_visual_selection(ag_stats['Agent'].unique(), 'agent', 'deep_a_sel', multi=False, key_state='deep_agent')
+            
+            sel_agent = st.session_state.deep_agent
+            
+            if sel_agent:
+                # Filter auf Agent
+                df_ag = df_deep[df_deep['Agent'] == sel_agent]
+                # Durchschnittliche Nutzung pro Map berechnen
+                map_util = df_ag.groupby('Map')[['Cast_Grenade', 'Cast_Abil1', 'Cast_Abil2', 'Cast_Ult']].mean().reset_index()
+                
+                # Umformen für Stacked Bar Chart
+                map_melt = map_util.melt(id_vars='Map', var_name='Ability', value_name='Avg Casts')
+                
+                fig2 = px.bar(map_melt, x='Map', y='Avg Casts', color='Ability',
+                              title=f"Average Utility Usage for {sel_agent} per Map",
+                              color_discrete_map={
+                                  'Cast_Ult': '#FF1493', 
+                                  'Cast_Grenade': '#88FFFF',
+                                  'Cast_Abil1': '#00BFFF',
+                                  'Cast_Abil2': '#0055AA'
+                              })
+                fig2.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(255,255,255,0.05)', font=dict(color='white'))
+                st.plotly_chart(fig2, use_container_width=True)
+        
+        else:
+            st.info("👆 Bitte lade eine JSON-Datei hoch (Tracker.gg Match-Export oder Profil-Export), um die Analyse zu starten.")
 
 # ==============================================================================
 # 8. DATABASE
