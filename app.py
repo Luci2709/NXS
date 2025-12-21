@@ -103,11 +103,37 @@ USER_CREDENTIALS = {
     "testing": {"password": "test123", "role": "testing"},
 }
 
-def check_credentials(username, password):
-    """Check if username/password combination is valid"""
-    if username in USER_CREDENTIALS:
-        if USER_CREDENTIALS[username]["password"] == password:
-            return USER_CREDENTIALS[username]["role"]
+def load_users_db():
+    """Load users from GSheets or seed from USER_CREDENTIALS"""
+    try:
+        df = conn.read(worksheet="nexus_users", ttl=0)
+        if df.empty or 'Username' not in df.columns: raise Exception("Init")
+        if 'MustChangePassword' not in df.columns: df['MustChangePassword'] = False
+        return df
+    except:
+        # Seed Data
+        data = []
+        for u, c in USER_CREDENTIALS.items():
+            # Force reset for players as requested
+            reset = True if c['role'] == 'player' else False
+            data.append({'Username': u, 'Password': c['password'], 'Role': c['role'], 'MustChangePassword': reset})
+        df_new = pd.DataFrame(data)
+        try: conn.create(worksheet="nexus_users", data=df_new)
+        except: 
+            try: conn.update(worksheet="nexus_users", data=df_new)
+            except: pass
+        return df_new
+
+def save_users_db(df):
+    try: conn.update(worksheet="nexus_users", data=df)
+    except Exception as e: st.error(f"DB Error: {e}")
+
+def check_credentials(username, password, df_users):
+    """Check credentials against DataFrame"""
+    if df_users.empty: return None
+    user = df_users[df_users['Username'] == username]
+    if not user.empty and str(user.iloc[0]['Password']) == str(password):
+        return user.iloc[0]
     return None
 
 def get_allowed_pages(role):
@@ -125,6 +151,28 @@ def get_allowed_pages(role):
 def login_page():
     """Display login page"""
     st.title("🔐 NEXUS LOGIN")
+
+    # --- PASSWORD RESET FLOW ---
+    if 'change_password_user' in st.session_state:
+        u = st.session_state.change_password_user
+        st.warning(f"⚠️ Security Alert: Please set a new password for **{u}**.")
+        with st.form("pwd_reset"):
+            p1 = st.text_input("New Password", type="password")
+            p2 = st.text_input("Confirm Password", type="password")
+            if st.form_submit_button("Update Password"):
+                if p1 != p2: st.error("Passwords do not match.")
+                elif not p1: st.error("Password cannot be empty.")
+                else:
+                    df = load_users_db()
+                    df.loc[df['Username']==u, 'Password'] = p1
+                    df.loc[df['Username']==u, 'MustChangePassword'] = False
+                    save_users_db(df)
+                    # Auto Login
+                    user_row = df[df['Username']==u].iloc[0]
+                    st.session_state.authenticated = True; st.session_state.username = u
+                    st.session_state.role = user_row['Role']; st.session_state.allowed_pages = get_allowed_pages(user_row['Role'])
+                    del st.session_state.change_password_user; st.success("Password updated!"); st.rerun()
+        return
 
     st.markdown("---")
 
@@ -144,12 +192,18 @@ def login_page():
                 if not username or not password:
                     st.error("Please enter both username and password.")
                 else:
-                    role = check_credentials(username, password)
-                    if role:
+                    df_users = load_users_db()
+                    user = check_credentials(username, password, df_users)
+                    if user is not None:
+                        # Check for forced reset
+                        if str(user.get('MustChangePassword', 'False')).upper() == 'TRUE':
+                            st.session_state.change_password_user = username
+                            st.rerun()
+                        
                         st.session_state.authenticated = True
                         st.session_state.username = username
-                        st.session_state.role = role
-                        st.session_state.allowed_pages = get_allowed_pages(role)
+                        st.session_state.role = user['Role']
+                        st.session_state.allowed_pages = get_allowed_pages(user['Role'])
                         st.success(f"Welcome {username}! Redirecting...")
                         st.rerun()
                     else:
@@ -1810,16 +1864,7 @@ elif page == "👥 COACHING":
         player_todos = df_todos[(df_todos['Player'] == current_user) & (df_todos['Completed'] == False)]
         incomplete_todos = len(player_todos)
         
-        # Load playbooks for linking
-        try:
-            df_legacy_pb = pd.read_csv(PLAYBOOKS_FILE, encoding='utf-8')
-        except:
-            df_legacy_pb = pd.DataFrame()
-        
-        try:
-            df_team_pb = pd.read_csv(TEAM_PLAYBOOKS_FILE, encoding='utf-8')
-        except:
-            df_team_pb = pd.DataFrame()
+        # Note: df_legacy_pb and df_team_pb are already loaded globally from GSheets.
         
         with st.container():
             st.markdown("### 📋 My Assigned Tasks")
@@ -1877,15 +1922,18 @@ elif page == "👥 COACHING":
                                 st.markdown(f"**📺 YouTube:** [{todo['YoutubeLink']}]({todo['YoutubeLink']})")
                             
                             if not completed:
-                                if st.button("✅ Mark as Completed", key=f"complete_{todo['ID']}"):
-                                    # Mark as completed
-                                    df_todos.loc[df_todos['ID'] == todo['ID'], 'Completed'] = True
-                                    df_todos.loc[df_todos['ID'] == todo['ID'], 'CompletedAt'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                if st.button("✅ Mark as Completed (Delete)", key=f"complete_{todo['ID']}"):
+                                    # Delete task instead of just marking it
+                                    df_todos = df_todos[df_todos['ID'] != todo['ID']]
                                     save_player_todos(df_todos)
-                                    st.success("Task marked as completed!")
+                                    st.success("Task completed and removed!")
                                     st.rerun()
                             else:
                                 st.success(f"✅ Completed on {todo['CompletedAt']}")
+                                if st.button("🗑️ Delete", key=f"del_comp_{todo['ID']}"):
+                                    df_todos = df_todos[df_todos['ID'] != todo['ID']]
+                                    save_player_todos(df_todos)
+                                    st.rerun()
 
 # ==============================================================================
 # ⚽ SCRIMS
@@ -3156,6 +3204,10 @@ elif page == "📅 CALENDAR":
         sel_filter = st.selectbox("Filter Events:", filter_opts, index=def_idx)
         
         df_cal_view = df_cal.copy()
+        # Robustness: Ensure columns exist to prevent KeyError
+        for c in ['Date', 'Time', 'Event', 'Map', 'Type', 'Players']:
+            if c not in df_cal_view.columns: df_cal_view[c] = ""
+
         if sel_filter != "All":
             target_user = current_user if sel_filter == "My Events" else sel_filter
             if target_user:
