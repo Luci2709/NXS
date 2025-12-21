@@ -2,8 +2,10 @@ streamlit
 pandas
 plotly
 requests
+st-gsheets-connection
 numpy
 Pillow
+python-pptx
+fpdf
+st-img-pastebutton
 streamlit-drawable-canvas
-watchdog
-st-gsheets-connection

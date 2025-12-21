@@ -14,7 +14,26 @@ import io
 import numpy as np
 import time
 from datetime import datetime, date, timedelta
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageEnhance
+try:
+    import pptx
+    from pptx.util import Inches
+    HAS_PPTX = True
+except ImportError:
+    HAS_PPTX = False
+try:
+    from fpdf import FPDF
+    HAS_FPDF = True
+except ImportError:
+    HAS_FPDF = False
+try:
+    from st_img_pastebutton import paste
+    HAS_CLIPBOARD = True
+    CLIPBOARD_ERR = None
+except ImportError as e:
+    HAS_CLIPBOARD = False
+    CLIPBOARD_ERR = str(e)
+import random
 
 # ==============================================================================
 # 🔧 ROBUST MONKEY PATCH (Fix für Component Error & Streamlit 1.40+)
@@ -512,6 +531,49 @@ st.markdown("""
         font-size: 12px;          /* Gut lesbare Größe */
         line-height: 1;
     }
+
+    /* --- CALENDAR & TODO --- */
+    .cal-day-box {
+        min-height: 120px;        /* Bigger height for calendar boxes */
+        background-color: #121212;
+        border: 1px solid #333;
+        border-radius: 6px;
+        padding: 8px;
+        margin: 2px;
+        transition: transform 0.2s, border-color 0.2s;
+        overflow: hidden;
+    }
+    .cal-day-box:hover {
+        border-color: #00BFFF;
+        background-color: #1a1a1a;
+    }
+    .cal-date {
+        font-weight: 900;
+        color: #555;
+        margin-bottom: 5px;
+        font-size: 1.1em;
+    }
+    .cal-today {
+        border: 1px solid #00BFFF !important;
+        background-color: #0f1820 !important;
+    }
+    .cal-today .cal-date { color: #00BFFF; }
+    
+    .cal-event-pill {
+        margin-top: 3px;
+        padding: 3px 6px;
+        border-radius: 3px;
+        font-size: 0.75em;
+        font-weight: 700;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: white;
+        display: block;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        border-left-width: 3px;
+        border-left-style: solid;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -523,12 +585,31 @@ ASSET_DIR = os.path.join(BASE_DIR, "assets")
 STRAT_IMG_DIR = os.path.join(ASSET_DIR, "strats")
 PLAYBOOKS_FILE = os.path.join(BASE_DIR, "data", "playbooks.csv")
 TEAM_PLAYBOOKS_FILE = os.path.join(BASE_DIR, "data", "nexus_playbooks.csv")
+PRESETS_FILE = os.path.join(BASE_DIR, "data", "pdf_presets.json")
 
 # Verzeichnisse erstellen
-for d in [DATA_DIR_JSON, os.path.join(BASE_DIR, "data"), STRAT_IMG_DIR, os.path.join(ASSET_DIR, "maps"), os.path.join(ASSET_DIR, "agents")]:
+for d in [DATA_DIR_JSON, os.path.join(BASE_DIR, "data"), STRAT_IMG_DIR, os.path.join(ASSET_DIR, "maps"), os.path.join(ASSET_DIR, "agents"), os.path.join(ASSET_DIR, "fonts"), os.path.join(ASSET_DIR, "playbook")]:
     if not os.path.exists(d): os.makedirs(d)
 
 OUR_TEAM = ["Trashies", "Luggi", "Umbra", "Noctis", "n0thing", "Gengar"]
+
+# --- DISCORD CONFIGURATION ---
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1452361543751565446/OVzSvaZ7LYCzU9gKW6QFyaV84Edxfi_6rF7Jjz5QxlpZlXfbC3gGQKzUoX0k_Q9TMC6f"  # ⚠️ REPLACE THIS WITH YOUR ACTUAL DISCORD WEBHOOK URL
+
+PLAYER_DISCORD_MAPPING = {
+    "Luggi": "<@713352448034734081>", # Replace with actual Discord User IDs (e.g., <@209384029384>)
+    "Benni": "<@728923466161717338>",
+    "Andrei": "<@262685797189287937>",
+    "Luca": "<@665846859578867732>",
+    "Sofi": "<@591563019046223894>",
+    "Remus": "<@293790883420045314>"
+}
+
+def send_discord_notification(player_name, task_title, description):
+    ping = PLAYER_DISCORD_MAPPING.get(player_name, player_name)
+    content = f"📢 **New Task Assigned!**\n\n👤 **Player:** {ping}\n📝 **Task:** {task_title}\nℹ️ **Details:** {description}\n\n_Check the Nexus Dashboard (https://nxs-dashboard.streamlit.app) for more info._"
+    try: requests.post(DISCORD_WEBHOOK_URL, json={"content": content})
+    except Exception as e: print(f"Discord Webhook Error: {e}")
 
 # --- HELPER ---
 def get_map_img(map_name, type='list'):
@@ -558,6 +639,70 @@ def get_agent_img(agent_name):
     clean = str(agent_name).lower().replace("/", "").strip()
     path = os.path.join(ASSET_DIR, "agents", f"{clean}.png")
     return path if os.path.exists(path) else None
+
+def create_styled_agent_pil(agent_name):
+    """Generates a circular agent icon with theme background (PIL Image)"""
+    img_path = get_agent_img(agent_name)
+    if not img_path: return None
+    
+    try:
+        with Image.open(img_path) as img:
+            img = img.convert("RGBA")
+            img.thumbnail((100, 100), Image.Resampling.LANCZOS)
+            
+            ac = {
+                "astra": "#653491", "breach": "#bc5434", "brimstone": "#d56e23", "chamber": "#e3b62d",
+                "clove": "#e882a8", "cypher": "#d6d6d6", "deadlock": "#bcc6cc", "fade": "#4c4c4c",
+                "gekko": "#b6ff59", "harbor": "#2d6e68", "iso": "#4b48ac", "jett": "#90e0ef",
+                "kay/o": "#4bb0a8", "killjoy": "#f7d336", "neon": "#2c4f9e", "omen": "#4f4f8f",
+                "phoenix": "#ff7f50", "raze": "#ff6a00", "reyna": "#b74b8e", "sage": "#52ffce",
+                "skye": "#8fbc8f", "sova": "#6fa8dc", "viper": "#32cd32", "tejo": "#E97223", "yoru": "#334488", "vyse": "#7b68ee"
+            }
+            bg_col = ac.get(str(agent_name).lower(), "#2c003e")
+            
+            bg = Image.new("RGBA", (100, 100), bg_col)
+            offset = ((100 - img.width) // 2, (100 - img.height) // 2)
+            bg.paste(img, offset, img)
+            
+            mask = Image.new("L", (100, 100), 0)
+            draw = ImageDraw.Draw(mask)
+            draw.ellipse((0, 0, 100, 100), fill=255)
+            
+            final = Image.new("RGBA", (100, 100), (0,0,0,0))
+            final.paste(bg, (0,0), mask=mask)
+            
+            return final
+    except:
+        return None
+
+def get_styled_agent_img_b64(agent_name):
+    img = create_styled_agent_pil(agent_name)
+    if img:
+        buff = io.BytesIO()
+        img.save(buff, format="PNG")
+        return base64.b64encode(buff.getvalue()).decode()
+    # Fallback
+    return img_to_b64(get_agent_img(agent_name))
+
+def create_team_composite(agents):
+    """Creates a horizontal strip of styled agent icons"""
+    images = [create_styled_agent_pil(a) for a in agents if a]
+    images = [i for i in images if i is not None]
+    if not images: return None
+    
+    w, h = images[0].size
+    total_w = w * len(images) + 10 * (len(images)-1)
+    
+    comp = Image.new("RGBA", (total_w, h), (0,0,0,0))
+    x = 0
+    for img in images:
+        comp.paste(img, (x, 0))
+        x += w + 10
+    
+    buff = io.BytesIO()
+    comp.save(buff, format="PNG")
+    buff.seek(0)
+    return buff
 
 def img_to_b64(img_path):
     if not img_path or not os.path.exists(img_path): return ""
@@ -709,16 +854,6 @@ def save_player_todos(df_new):
         conn.update(worksheet="player_todos", data=df_new); time.sleep(1); st.cache_data.clear()
     except Exception as e: st.error(f"Save Error: {e}")
 
-def save_player_messages(df_new):
-    try:
-        conn.update(worksheet="player_messages", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
-
-def save_team_playbooks(df_new):
-    try:
-        conn.update(worksheet="nexus_playbooks", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
-
 def save_legacy_playbooks(df_new):
     try:
         conn.update(worksheet="playbooks", data=df_new); time.sleep(1); st.cache_data.clear()
@@ -742,6 +877,11 @@ def save_resources(df_new):
 def save_calendar(df_new):
     try:
         conn.update(worksheet="calendar", data=df_new); time.sleep(1); st.cache_data.clear()
+    except Exception as e: st.error(f"Save Error: {e}")
+
+def save_team_playbooks(df_new):
+    try:
+        conn.update(worksheet="nexus_playbooks", data=df_new); time.sleep(1); st.cache_data.clear()
     except Exception as e: st.error(f"Save Error: {e}")
 
 def save_simple_todos(df_new):
@@ -840,6 +980,17 @@ def parse_tracker_json(file_input):
                     c_abil2 = stats.get('ability2Casts', {}).get('value', 0)
                     c_ult = stats.get('ultimateCasts', {}).get('value', 0)
                     
+                    # Advanced Stats (FK, FD, Clutches, KAST)
+                    fk = stats.get('firstBloods', {}).get('value', 0)
+                    fd = stats.get('firstDeaths', {}).get('value', 0)
+                    # Clutches (Summe aller 1vX)
+                    clutches = sum([stats.get(f'clutches1v{i}', {}).get('value', 0) for i in range(1, 6)])
+                    kast = stats.get('kast', {}).get('value', 0)
+                    
+                    # KAS Fallback (Kill, Assist, Survive %) falls KAST fehlt
+                    if kast == 0 and rounds > 0:
+                        kast = ((kills + assists + (rounds - deaths)) / rounds) * 100
+                    
                     # Result
                     res = "Unknown"
                     if 'result' in meta: res = meta['result']
@@ -861,6 +1012,7 @@ def parse_tracker_json(file_input):
                         'Cast_Grenade': c_grenade, 'Cast_Abil1': c_abil1,
                         'Cast_Abil2': c_abil2, 'Cast_Ult': c_ult,
                         'Total_Util': c_grenade + c_abil1 + c_abil2 + c_ult,
+                        'FK': fk, 'FD': fd, 'Clutches': clutches, 'KAST': kast,
                         'MatchesPlayed': 1,
                         'Wins': 1 if res == "Victory" else 0
                     })
@@ -889,6 +1041,19 @@ def parse_tracker_json(file_input):
                 c_abil2 = stats.get('ability2Casts', {}).get('value', 0)
                 c_ult = stats.get('ultimateCasts', {}).get('value', 0)
                 
+                fk = stats.get('firstBloods', {}).get('value', 0)
+                fd = stats.get('firstDeaths', {}).get('value', 0)
+                kast = stats.get('kast', {}).get('value', 0)
+                
+                # Extract vars for KAS calc
+                k = stats.get('kills', {}).get('value', 0)
+                d = stats.get('deaths', {}).get('value', 0)
+                a = stats.get('assists', {}).get('value', 0)
+                r = stats.get('roundsPlayed', {}).get('value', 0)
+                
+                if kast == 0 and r > 0:
+                    kast = ((k + a + (r - d)) / r) * 100
+                
                 parsed_data.append({
                     'MatchID': 'Profile_Aggregated',
                     'Date': 'Aggregated',
@@ -896,16 +1061,17 @@ def parse_tracker_json(file_input):
                     'Player': player_name,
                     'Agent': meta.get('name', 'Unknown'),
                     'Result': 'Aggregated',
-                    'Kills': stats.get('kills', {}).get('value', 0),
-                    'Deaths': stats.get('deaths', {}).get('value', 0),
-                    'Assists': stats.get('assists', {}).get('value', 0),
+                    'Kills': k,
+                    'Deaths': d,
+                    'Assists': a,
                     'KD': stats.get('kdRatio', {}).get('value', 0),
                     'HS%': stats.get('headshotsPercentage', {}).get('value', 0),
                     'ADR': stats.get('damagePerRound', {}).get('value', 0),
-                    'Rounds': stats.get('roundsPlayed', {}).get('value', 0),
+                    'Rounds': r,
                     'Cast_Grenade': c_grenade, 'Cast_Abil1': c_abil1,
                     'Cast_Abil2': c_abil2, 'Cast_Ult': c_ult,
                     'Total_Util': c_grenade + c_abil1 + c_abil2 + c_ult,
+                    'FK': fk, 'FD': fd, 'Clutches': 0, 'KAST': kast, # Clutches oft nicht im Map-Segment
                     'MatchesPlayed': stats.get('matchesPlayed', {}).get('value', 0),
                     'Wins': stats.get('matchesWon', {}).get('value', 0)
                 })
@@ -918,101 +1084,121 @@ def parse_tracker_json(file_input):
 # 💾 GOOGLE SHEETS DATA LOADER (MIT RATE LIMIT SCHUTZ)
 # ==============================================================================
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def load_data(dummy=None):
-    # Hilfsfunktion mit Retry-Logik (Wartet bei Fehler 429)
-    def get_sheet(worksheet_name, cols=None):
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                # Versuche zu lesen
-                df = conn.read(worksheet=worksheet_name, ttl=0).dropna(how="all")
-                if df.empty and cols:
-                    return pd.DataFrame(columns=cols)
-                
-                # Ensure columns exist
-                if cols:
-                    for col in cols:
-                        if col not in df.columns:
-                            df[col] = None
-                            
-                return df
-            except Exception as e:
-                # Prüfen ob es ein Rate Limit Fehler ist (Code 429)
-                if "429" in str(e) or "Quota exceeded" in str(e):
-                    wait_time = (attempt + 1) * 2  # Warte 2s, dann 4s, dann 6s
-                    print(f"⚠️ Google API Rate Limit bei '{worksheet_name}'. Warte {wait_time}s...")
-                    time.sleep(wait_time)
-                else:
-                    # Bei anderen Fehlern, versuche lokale CSV zu laden
-                    local_path = os.path.join(BASE_DIR, "data", f"{worksheet_name}.csv")
-                    if os.path.exists(local_path):
-                        try:
-                            df_local = pd.read_csv(local_path, encoding='utf-8')
-                            print(f"⚠️ Loaded {worksheet_name} from local CSV.")
-                            return df_local.dropna(how="all")
-                        except Exception as e2:
-                            print(f"⚠️ Failed to load local CSV for {worksheet_name}: {e2}")
-                    # Wenn alles fehlschlägt -> Leeres DF
-                    return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
-        
-        # Wenn es nach 3 Versuchen nicht klappt -> Leeres DF zurückgeben
-        return pd.DataFrame(columns=cols) if cols else pd.DataFrame()
-
-    # --- DATEN LADEN (Mit kleiner Pause zwischen schweren Blöcken) ---
+    # --- OPTIMIZED DATA LOADING ---
+    # Fetch all required sheets in a single API call to improve performance.
     
-    # Block 1: Wichtige Match Daten
-    df = get_sheet("nexus_matches", ['Date', 'Map', 'Result', 'Score_Us', 'Score_Enemy'])
+    all_worksheet_names = [
+        "nexus_matches", "Premier - PlayerStats", "scrims", "scrim_availability",
+        "player_todos", "nexus_playbooks", "playbooks",
+        "nexus_pb_strats", "nexus_map_theory", "resources", "calendar", "todo"
+    ]
+    
+    all_sheets = {}
+    
+    # Progress Bar
+    prog_bar = st.progress(0, text="Initializing data connection...")
+    total_sheets = len(all_worksheet_names)
+
+    for i, name in enumerate(all_worksheet_names):
+        prog_bar.progress(i / total_sheets, text=f"Fetching {name}...")
+        try:
+            all_sheets[name] = conn.read(worksheet=name, ttl=0)
+        except:
+            all_sheets[name] = pd.DataFrame()
+            
+    prog_bar.empty()
+
+    def get_df(name, cols=None):
+        """Safely gets a DataFrame from the loaded dictionary, ensuring columns exist."""
+        df = all_sheets.get(name)
+        
+        # If the sheet was not found or is empty
+        if df is None or df.empty:
+            return pd.DataFrame(columns=cols if cols else [])
+
+        df = df.dropna(how="all")
+        
+        if cols:
+            for col in cols:
+                if col not in df.columns:
+                    df[col] = None
+        return df
+
+    # --- DATA ASSIGNMENT & PROCESSING ---
+    
+    # Block 1: Match Daten
+    df = get_df("nexus_matches", ['Date', 'Map', 'Result', 'Score_Us', 'Score_Enemy', 'MatchID'])
     if not df.empty and 'Date' in df.columns:
-        df['DateObj'] = pd.to_datetime(df['Date'], format="%d.%m.%Y", errors='coerce')
+        if 'Map' in df.columns: df['Map'] = df['Map'].astype(str).str.strip().str.title()
+        if 'Result' in df.columns: df['Result'] = df['Result'].astype(str).str.strip().str.upper()
+        df['DateObj'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
         for c in ['Score_Us', 'Score_Enemy', 'Atk_R_W', 'Def_R_W', 'Atk_R_L', 'Def_R_L']:
             if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
         df['Delta'] = df['Score_Us'] - df['Score_Enemy']
     
-    # Kleine Pause um API zu schonen
-    time.sleep(0.5)
-
     # Block 2: Statistiken & Scrims
-    df_p = get_sheet("Premier - PlayerStats")
-    df_scrims = get_sheet("scrims", ['ID', 'Title', 'Date', 'Time', 'Map', 'Description', 'CreatedBy', 'CreatedAt', 'PlaybookLink', 'VideoLink'])
+    df_p = get_df("Premier - PlayerStats")
+    df_scrims = get_df("scrims", ['ID', 'Title', 'Date', 'Time', 'Map', 'Description', 'CreatedBy', 'CreatedAt', 'PlaybookLink', 'VideoLink'])
     if not df_scrims.empty:
         df_scrims['DateTimeObj'] = pd.to_datetime(df_scrims['Date'] + ' ' + df_scrims['Time'], format="%Y-%m-%d %H:%M", errors='coerce')
     
-    df_availability = get_sheet("scrim_availability", ['ScrimID', 'Player', 'Available', 'UpdatedAt'])
-
-    # Kleine Pause
-    time.sleep(0.5)
+    df_availability = get_df("scrim_availability", ['ScrimID', 'Player', 'Available', 'UpdatedAt'])
 
     # Block 3: Player Management
-    df_todos = get_sheet("player_todos", ['ID', 'Player', 'Title', 'Description', 'PlaybookLink', 'YoutubeLink', 'AssignedBy', 'AssignedAt', 'Completed', 'CompletedAt'])
+    df_todos = get_df("player_todos", ['ID', 'Player', 'Title', 'Description', 'PlaybookLink', 'YoutubeLink', 'AssignedBy', 'AssignedAt', 'Completed', 'CompletedAt'])
     if not df_todos.empty and 'Completed' in df_todos.columns:
         df_todos['Completed'] = df_todos['Completed'].astype(str).str.lower() == 'true'
 
-    df_messages = get_sheet("player_messages", ['ID', 'FromUser', 'ToUser', 'Message', 'SentAt', 'Read'])
-    if not df_messages.empty and 'Read' in df_messages.columns:
-        df_messages['Read'] = df_messages['Read'].astype(str).str.lower() == 'true'
-
     # Block 4: Playbooks & Content
-    df_team_pb = get_sheet("nexus_playbooks", ['ID', 'Map', 'Name', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
-    df_legacy_pb = get_sheet("playbooks", ['Map', 'Name', 'Link', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
-    df_pb_strats = get_sheet("nexus_pb_strats", ['PB_ID', 'Strat_ID', 'Name', 'Image', 'Protocols'])
-    df_theory = get_sheet("nexus_map_theory", ['Map', 'Section', 'Content', 'Image'])
+    df_team_pb = get_df("nexus_playbooks", ['ID', 'Map', 'Name', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
+    df_legacy_pb = get_df("playbooks", ['Map', 'Name', 'Link', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
+    df_pb_strats = get_df("nexus_pb_strats", ['PB_ID', 'Strat_ID', 'Name', 'Image', 'Protocols', 'Notes', 'Tag', 'Order'])
+    if 'Notes' not in df_pb_strats.columns: df_pb_strats['Notes'] = ""
+    if 'Tag' not in df_pb_strats.columns: df_pb_strats['Tag'] = "Default"
+    if 'Order' not in df_pb_strats.columns: df_pb_strats['Order'] = range(len(df_pb_strats))
+    df_theory = get_df("nexus_map_theory", ['Map', 'Section', 'Content', 'Image'])
     
     # Block 5: Misc
-    df_res = get_sheet("resources", ['Title', 'Link', 'Category', 'Note'])
-    df_cal = get_sheet("calendar", ['Date', 'Time', 'Event', 'Map', 'Type'])
-    df_simple_todos = get_sheet("todo", ['Task', 'Done'])
+    df_res = get_df("resources", ['Title', 'Link', 'Category', 'Note'])
+    df_cal = get_df("calendar", ['Date', 'Time', 'Event', 'Map', 'Type', 'Players'])
+    df_simple_todos = get_df("todo", ['Task', 'Done'])
     if not df_simple_todos.empty and 'Done' in df_simple_todos.columns:
         df_simple_todos['Done'] = df_simple_todos['Done'].astype(str).str.lower() == 'true'
 
-    return df, df_p, df_scrims, df_availability, df_todos, df_messages, df_team_pb, df_legacy_pb, df_pb_strats, df_theory, df_res, df_cal, df_simple_todos
+    return df, df_p, df_scrims, df_availability, df_todos, df_team_pb, df_legacy_pb, df_pb_strats, df_theory, df_res, df_cal, df_simple_todos
 
 # ==============================================================================
 # 🚀 APP START & DATEN LADEN
 # ==============================================================================
 
 # HIER WERDEN DIE DATEN GELADEN UND DIE VARIABLEN GLOBAL GESETZT
-df, df_players, df_scrims, df_availability, df_todos, df_messages, df_team_pb, df_legacy_pb, df_pb_strats, df_theory, df_res, df_cal, df_simple_todos = load_data()
+LOADING_QUOTES = [
+    "Planting the Spike...",
+    "Checking corners...",
+    "Asking Sage for a heal...",
+    "Rotating to A...",
+    "Calculating lineups...",
+    "Jett is dashing in...",
+    "Sova is droning...",
+    "Reviewing the VOD...",
+    "Eco round...",
+    "Buying shields...",
+    "Defusing...",
+    "Flash out!",
+    "Reviving...",
+    "One tap machine warming up...",
+    "Installing aimbot... (just kidding)",
+    "Fetching the strat book...",
+    "Analyzing enemy patterns...",
+    "Hydrating...",
+    "Tactical timeout...",
+    "Rush B do not stop..."
+]
+
+with st.spinner(random.choice(LOADING_QUOTES)):
+    df, df_players, df_scrims, df_availability, df_todos, df_team_pb, df_legacy_pb, df_pb_strats, df_theory, df_res, df_cal, df_simple_todos = load_data()
 
 # Handle navigation triggers
 if "trigger_navigation" in st.session_state:
@@ -1059,7 +1245,6 @@ if page == "🏠 DASHBOARD":
 
     # --- Data for "What's Next" widget ---
     incomplete_todos = 0
-    unread_messages = 0
     next_event_str = "No upcoming events."
     next_event_nav = None
 
@@ -1067,8 +1252,6 @@ if page == "🏠 DASHBOARD":
     if user_role == 'player' and current_user:
         player_todos = df_todos[(df_todos['Player'] == current_user) & (df_todos['Completed'] == False)]
         incomplete_todos = len(player_todos)
-        player_messages = df_messages[(df_messages['ToUser'] == current_user) & (df_messages['Read'] == False)]
-        unread_messages = len(player_messages)
     # Upcoming events (Scrims and Calendar)
     now = pd.Timestamp.now()
     upcoming_events = []
@@ -1117,10 +1300,11 @@ if page == "🏠 DASHBOARD":
                 st.session_state['trigger_navigation'] = next_event_nav; st.rerun()
             if incomplete_todos > 0 and st.button(f"📝 **{incomplete_todos}** pending task(s)", use_container_width=True, key="dash_nav_todo"):
                 st.session_state['trigger_navigation'] = "👥 COACHING"; st.rerun()
-            if unread_messages > 0 and st.button(f"💬 **{unread_messages}** unread message(s)", use_container_width=True, key="dash_nav_msg"):
-                st.session_state['trigger_navigation'] = "👥 COACHING"; st.rerun()
-            if not next_event_nav and incomplete_todos == 0 and unread_messages == 0:
+            if not next_event_nav and incomplete_todos == 0:
                 st.caption("All clear! ✨")
+
+    # Initialize df_filt
+    df_filt = pd.DataFrame()
 
     with main_col:
         # --- Statistiken und Charts ---
@@ -1129,8 +1313,14 @@ if page == "🏠 DASHBOARD":
             c1, c2 = st.columns([1,3])
             with c1: start_d = st.date_input("Stats ab:", min_date)
             df_filt = df[df['DateObj'] >= pd.Timestamp(start_d)].copy()
-            
-            if not df_filt.empty:
+        else:
+            st.info("No match data available. Please import matches in the 'Match Entry' tab.")
+
+    if not df.empty:
+        if not df_filt.empty:
+            tab_overview, tab_team_stats = st.tabs(["📊 OVERVIEW", "📈 TEAM STATS"])
+
+            with tab_overview:
                 # --- CONFIDENCE SCALE ---
                 st.divider(); st.markdown("### 📊 MAP CONFIDENCE")
                 all_maps = sorted(df_filt['Map'].unique())
@@ -1271,7 +1461,7 @@ if page == "🏠 DASHBOARD":
                                 else:
                                     html += f"<div class='val-agent-img' style='background:#333' title='?'></div>"
                             else:
-                                 html += f"<div class='val-agent-img' style='background:transparent; border:1px dashed #333'></div>"
+                                    html += f"<div class='val-agent-img' style='background:transparent; border:1px dashed #333'></div>"
                         return html
 
                     my_agents = get_agent_row_html('MyComp')
@@ -1326,10 +1516,151 @@ if page == "🏠 DASHBOARD":
                     
                     st.markdown(html_card.replace("\n", " "), unsafe_allow_html=True)
 
-            else:
-                st.info("No matches found for the selected date range.")
+            with tab_team_stats:
+                st.markdown("### 📈 TEAM STATISTICS")
+                
+                # KPIs
+                total_matches = len(df_filt)
+                wins = len(df_filt[df_filt['Result'] == 'W'])
+                winrate = (wins / total_matches) * 100 if total_matches > 0 else 0
+                
+                atk_w = df_filt['Atk_R_W'].sum()
+                atk_l = df_filt['Atk_R_L'].sum()
+                atk_wr = (atk_w / (atk_w + atk_l) * 100) if (atk_w + atk_l) > 0 else 0
+                
+                def_w = df_filt['Def_R_W'].sum()
+                def_l = df_filt['Def_R_L'].sum()
+                def_wr = (def_w / (def_w + def_l) * 100) if (def_w + def_l) > 0 else 0
+                
+                k1, k2, k3, k4 = st.columns(4)
+                k1.metric("Matches", total_matches)
+                k2.metric("Winrate", f"{winrate:.1f}%")
+                k3.metric("Attack Win%", f"{atk_wr:.1f}%")
+                k4.metric("Defense Win%", f"{def_wr:.1f}%")
+                
+                st.divider()
+                
+                st.markdown("#### 📉 Winrate Trend")
+                if not df_filt.empty:
+                    df_trend = df_filt.sort_values('DateObj').copy()
+                    df_trend['WinNum'] = df_trend['Result'].apply(lambda x: 1 if x == 'W' else 0)
+                    df_trend['Cumulative Winrate'] = df_trend['WinNum'].expanding().mean() * 100
+                    df_trend['Winrate (Last 5 Matches)'] = df_trend['WinNum'].rolling(window=5, min_periods=1).mean() * 100
+                    
+                    # Melt for plotly to show both lines
+                    df_melt = df_trend.melt(id_vars=['DateObj', 'MatchID'], value_vars=['Cumulative Winrate', 'Winrate (Last 5 Matches)'], 
+                                            var_name='Metric', value_name='Winrate')
+                    
+                    fig_trend = px.line(df_melt, x='DateObj', y='Winrate', color='Metric',
+                                        markers=True,
+                                        title="Winrate Trend (Cumulative vs Form)",
+                                        color_discrete_map={'Cumulative Winrate': '#00BFFF', 'Winrate (Last 5 Matches)': '#FF1493'})
+                    
+                    fig_trend.update_layout(
+                        xaxis_title=None, yaxis_title="Winrate %",
+                        yaxis=dict(range=[0, 110]),
+                        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(255,255,255,0.05)',
+                        font=dict(color='white'),
+                        legend=dict(orientation="h", y=1.1, x=0, title=None),
+                        margin=dict(l=0, r=0, t=20, b=0),
+                        hovermode="x unified"
+                    )
+                    st.plotly_chart(fig_trend, use_container_width=True)
+                
+                st.divider()
+
+                # --- Map Stats Calculation (moved up) ---
+                map_stats = pd.DataFrame()
+                if not df_filt.empty:
+                    map_stats = df_filt.groupby('Map').agg({
+                        'Result': lambda x: (x == 'W').sum(),
+                        'Date': 'count', # Use Date to count matches (safer than MatchID)
+                        'Atk_R_W': 'sum', 'Atk_R_L': 'sum',
+                        'Def_R_W': 'sum', 'Def_R_L': 'sum'
+                    }).rename(columns={'Date': 'Played', 'Result': 'Wins'})
+                    
+                    map_stats['Win%'] = (map_stats['Wins'] / map_stats['Played']) * 100
+                    map_stats['Atk%'] = (map_stats['Atk_R_W'] / (map_stats['Atk_R_W'] + map_stats['Atk_R_L']).replace(0,1)) * 100
+                    map_stats['Def%'] = (map_stats['Def_R_W'] / (map_stats['Def_R_W'] + map_stats['Def_R_L']).replace(0,1)) * 100
+                    
+                    map_stats = map_stats.sort_values('Win%', ascending=False)
+
+                # --- NEW: Map Winrate Chart ---
+                st.markdown("#### 🗺️ Map Winrate Comparison")
+                if not map_stats.empty:
+                    map_stats['Color'] = map_stats['Win%'].apply(lambda wr: '#00ff80' if wr >= 55 else ('#ffeb3b' if wr >= 45 else '#ff4655'))
+                    
+                    fig_map_wr = px.bar(map_stats, x=map_stats.index, y='Win%',
+                                        text_auto='.2s',
+                                        hover_data={'Played': True, 'Wins': True})
+                    fig_map_wr.update_traces(marker_color=map_stats['Color'], textposition='outside')
+                    fig_map_wr.update_layout(
+                        yaxis_title="Winrate %", xaxis_title=None,
+                        yaxis=dict(range=[0, 110]),
+                        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(255,255,255,0.05)',
+                        font=dict(color='white')
+                    )
+                    st.plotly_chart(fig_map_wr, use_container_width=True)
+                
+                st.divider()
+                
+                c1, c2 = st.columns([2, 1])
+                
+                with c1:
+                    st.markdown("#### 🗺️ Map Performance Details")
+                    if not map_stats.empty:
+                        map_stats_table = map_stats.sort_values('Played', ascending=False)
+
+                        # Add Icons & Reset Index
+                        # FIX: Nutze '_list.png' (Banner) statt Icon
+                        map_stats_table['Icon'] = map_stats_table.index.map(lambda x: f"data:image/png;base64,{img_to_b64(get_map_img(x, 'list'))}")
+                        map_stats_table = map_stats_table.reset_index()
+                        
+                        st.dataframe(
+                            map_stats_table[['Icon', 'Map', 'Played', 'Wins', 'Win%', 'Atk%', 'Def%']],
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Icon": st.column_config.ImageColumn("", width="small"),
+                                "Win%": st.column_config.ProgressColumn("Win%", format="%.1f%%", min_value=0, max_value=100),
+                                "Atk%": st.column_config.ProgressColumn("Atk%", format="%.1f%%", min_value=0, max_value=100),
+                                "Def%": st.column_config.ProgressColumn("Def%", format="%.1f%%", min_value=0, max_value=100),
+                            }
+                        )
+                    else:
+                        st.info("No data.")
+
+                with c2:
+                    st.markdown("#### ♟️ Agent Pick Rates")
+                    all_agents = []
+                    for i in range(1, 6):
+                        if f'MyComp_{i}' in df_filt.columns:
+                            all_agents.extend(df_filt[f'MyComp_{i}'].dropna().tolist())
+                    
+                    all_agents = [a for a in all_agents if a and str(a).strip() != ""]
+                    
+                    if all_agents:
+                        agent_counts = pd.Series(all_agents).value_counts().reset_index()
+                        agent_counts.columns = ['Agent', 'Count']
+                        agent_counts['Pick%'] = (agent_counts['Count'] / total_matches) * 100
+                        
+                        # Add Icons
+                        agent_counts['Icon'] = agent_counts['Agent'].map(lambda x: f"data:image/png;base64,{img_to_b64(get_agent_img(x))}")
+                        
+                        st.dataframe(
+                            agent_counts[['Icon', 'Agent', 'Count', 'Pick%']],
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Icon": st.column_config.ImageColumn("", width="small"),
+                                "Pick%": st.column_config.ProgressColumn("Pick Rate", format="%.0f%%", min_value=0, max_value=100)
+                            }
+                        )
+                    else:
+                        st.info("No agent data.")
+
         else:
-            st.info("No match data available. Please import matches in the 'Match Entry' tab.")
+            st.info("No matches found for the selected date range.")
 
 # ==============================================================================
 # 👥 COACHING
@@ -1362,7 +1693,7 @@ elif page == "👥 COACHING":
     
     if user_role == 'coach':
         # Coach view - manage all players
-        tab1, tab2, tab3 = st.tabs(["📝 Assign Todos", "💬 Send Messages", "📊 Player Overview"])
+        tab1, tab3 = st.tabs(["📝 Assign Todos", "📊 Player Overview"])
         
         with tab1:
             st.markdown("### 📝 Assign Tasks to Players")
@@ -1432,85 +1763,10 @@ elif page == "👥 COACHING":
                         updated_todos = pd.concat([df_todos, pd.DataFrame([new_todo])], ignore_index=True)
                         save_player_todos(updated_todos)
                         
+                        # DISCORD NOTIFICATION
+                        send_discord_notification(player, title, description)
+                        
                         st.success(f"Task '{title}' assigned to {player}!")
-                        st.rerun()
-        
-        with tab2:
-            st.markdown("### 💬 Chat with Players")
-            
-            # Select player to chat with
-            chat_player = st.selectbox("Chat with", 
-                                     ["Luggi","Benni","Andrei","Luca","Sofi","Remus"],
-                                    format_func=lambda x: f"🎮 {x}",
-                                    key="chat_player_select")
-            
-            if chat_player:
-                st.markdown(f"### 💬 Chat with {chat_player}")
-                
-                # Display chat history
-                chat_messages = df_messages[
-                    ((df_messages['FromUser'] == current_user) & (df_messages['ToUser'] == chat_player)) |
-                    ((df_messages['FromUser'] == chat_player) & (df_messages['ToUser'] == current_user))
-                ].sort_values('SentAt') if not df_messages.empty else pd.DataFrame()
-                
-                # Chat container
-                chat_container = st.container(height=400)
-                
-                with chat_container:
-                    if chat_messages.empty:
-                        st.info(f"No messages with {chat_player} yet. Start the conversation!")
-                    else:
-                        for _, msg in chat_messages.iterrows():
-                            is_from_coach = msg['FromUser'] == current_user
-                            
-                            col1, col2, col3 = st.columns([1, 3, 1])
-                            
-                            with col1 if is_from_coach else col3:
-                                sender = "You" if is_from_coach else msg['FromUser']
-                                st.caption(f"**{sender}**")
-                            
-                            with col2:
-                                # Message bubble styling
-                                bubble_style = "background-color: #007bff; color: white; padding: 10px; border-radius: 15px; margin: 5px 0;" if is_from_coach else "background-color: #f1f1f1; color: black; padding: 10px; border-radius: 15px; margin: 5px 0;"
-                                st.markdown(f"<div style='{bubble_style}'>{msg['Message']}</div>", unsafe_allow_html=True)
-                            
-                            with col3 if is_from_coach else col1:
-                                st.caption(msg['SentAt'])
-                
-                # Message input
-                message_key = f"chat_input_{chat_player}"
-                if message_key not in st.session_state:
-                    st.session_state[message_key] = ""
-                
-                # Clear input if just submitted
-                if st.session_state.get('just_submitted', False):
-                    st.session_state[message_key] = ""
-                    st.session_state['just_submitted'] = False
-                
-                with st.form(key=f"chat_form_{chat_player}"):
-                    message = st.text_input("Type your message...", 
-                                            value=st.session_state[message_key], 
-                                            key=message_key)
-                    submitted = st.form_submit_button("📤 Send")
-                    
-                    if submitted and message.strip():
-                        st.session_state['just_submitted'] = True
-                        
-                        message_id = str(uuid.uuid4())[:8]
-                        
-                        new_message = {
-                            'ID': message_id,
-                            'FromUser': current_user,
-                            'ToUser': chat_player,
-                            'Message': message.strip(),
-                            'SentAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            'Read': False
-                        }
-                        
-                        updated_messages = pd.concat([df_messages, pd.DataFrame([new_message])], ignore_index=True)
-                        save_player_messages(updated_messages)
-                        
-                        st.success("Message sent!")
                         st.rerun()
         
         with tab3:
@@ -1534,17 +1790,6 @@ elif page == "👥 COACHING":
                             st.progress(completion_rate / 100)
                             st.caption(f"{completion_rate}% completion rate")
                     
-                    # Message stats
-                    player_messages = df_messages[df_messages['ToUser'] == player]
-                    unread_messages = len(player_messages[player_messages['Read'] == False])
-                    
-                    with col2:
-                        st.metric("Unread Messages", unread_messages)
-                        if unread_messages > 0:
-                            st.warning(f"{unread_messages} unread message(s)")
-                        else:
-                            st.success("All messages read")
-                    
                     # Scrim availability
                     player_availability = df_availability[df_availability['Player'] == player]
                     available_count = len(player_availability[player_availability['Available'] == 'Yes'])
@@ -1564,8 +1809,6 @@ elif page == "👥 COACHING":
         # Check for notifications
         player_todos = df_todos[(df_todos['Player'] == current_user) & (df_todos['Completed'] == False)]
         incomplete_todos = len(player_todos)
-        player_messages = df_messages[(df_messages['ToUser'] == current_user) & (df_messages['Read'] == False)]
-        unread_messages = len(player_messages)
         
         # Load playbooks for linking
         try:
@@ -1578,9 +1821,7 @@ elif page == "👥 COACHING":
         except:
             df_team_pb = pd.DataFrame()
         
-        tab1, tab2 = st.tabs(["📋 My Tasks", "💬 My Messages"])
-        
-        with tab1:
+        with st.container():
             st.markdown("### 📋 My Assigned Tasks")
             
             if df_todos.empty:
@@ -1645,71 +1886,6 @@ elif page == "👥 COACHING":
                                     st.rerun()
                             else:
                                 st.success(f"✅ Completed on {todo['CompletedAt']}")
-        
-        with tab2:
-            st.markdown("### 💬 Chat with Coaches")
-            
-            # Get unique coaches who have messaged this player
-            coach_conversations = df_messages[
-                (df_messages['ToUser'] == current_user) | (df_messages['FromUser'] == current_user)
-            ]['FromUser'].unique() if not df_messages.empty else []
-            
-            coach_conversations = [c for c in coach_conversations if c != current_user]
-            
-            if not coach_conversations:
-                st.info("No conversations yet. Coaches will reach out to you here!")
-            else:
-                # Select coach to chat with
-                selected_coach = st.selectbox("Chat with", 
-                                                coach_conversations,
-                                                format_func=lambda x: f"👨‍🏫 {x}",
-                                                key="player_chat_select")
-                
-                if selected_coach:
-                    st.markdown(f"### 💬 Chat with {selected_coach}")
-                    
-                    # Display chat history
-                    chat_messages = df_messages[
-                        ((df_messages['FromUser'] == current_user) & (df_messages['ToUser'] == selected_coach)) |
-                        ((df_messages['FromUser'] == selected_coach) & (df_messages['ToUser'] == current_user))
-                    ].sort_values('SentAt')
-                    
-                    # Chat container
-                    chat_container = st.container(height=400)
-                    
-                    with chat_container:
-                        if chat_messages.empty:
-                            st.info(f"No messages with {selected_coach} yet.")
-                        else:
-                            for _, msg in chat_messages.iterrows():
-                                is_from_player = msg['FromUser'] == current_user
-                                
-                                col1, col2, col3 = st.columns([1, 3, 1])
-                                
-                                with col1 if is_from_player else col3:
-                                    sender = "You" if is_from_player else msg['FromUser']
-                                    st.caption(f"**{sender}**")
-                                
-                                with col2:
-                                    # Message bubble styling
-                                    bubble_style = "background-color: #28a745; color: white; padding: 10px; border-radius: 15px; margin: 5px 0;" if is_from_player else "background-color: #f1f1f1; color: black; padding: 10px; border-radius: 15px; margin: 5px 0;"
-                                    st.markdown(f"<div style='{bubble_style}'>{msg['Message']}</div>", unsafe_allow_html=True)
-                                
-                                with col3 if is_from_player else col1:
-                                    st.caption(msg['SentAt'])
-                    
-                    # Mark messages as read
-                    unread_messages = chat_messages[
-                        (chat_messages['ToUser'] == current_user) & (chat_messages['Read'] == False)
-                    ]
-                    
-                    if not unread_messages.empty:
-                        if st.button(f"Mark {len(unread_messages)} messages as read", key=f"mark_read_{selected_coach}"):
-                            for msg_id in unread_messages['ID']:
-                                df_messages.loc[df_messages['ID'] == msg_id, 'Read'] = True
-                            save_player_messages(df_messages)
-                            st.success("Messages marked as read!")
-                            st.rerun()
 
 # ==============================================================================
 # ⚽ SCRIMS
@@ -2073,7 +2249,7 @@ elif page == "📘 STRATEGY BOARD":
     # Load Data (Variables are already loaded globally: df_team_pb, df_pb_strats, df_theory)
     
     # TABS (INTEGRATION OF WHITEBOARD)
-    tab_playbooks, tab_whiteboard, tab_theory, tab_links = st.tabs(["🧠 TACTICAL PLAYBOOKS", "🎨 TACTICAL BOARD", "📜 MAP THEORY", "🔗 EXTERNAL LINKS"])
+    tab_playbooks, tab_theory, tab_links = st.tabs(["🧠 TACTICAL PLAYBOOKS", "📜 MAP THEORY", "🔗 EXTERNAL LINKS"])
 
     # --------------------------------------------------------------------------
     # TAB 1: TACTICAL PLAYBOOKS
@@ -2110,6 +2286,7 @@ elif page == "📘 STRATEGY BOARD":
                         a = row.get(f'Agent_{i}')
                         if a and pd.notna(a):
                             ab64 = img_to_b64(get_agent_img(a))
+                            ab64 = get_styled_agent_img_b64(a)
                             if ab64: ag_html += f"<img src='data:image/png;base64,{ab64}' style='width:35px; height:35px; border-radius:50%; border:2px solid #111; margin-right:-10px; z-index:{i}'>"
                     
                     st.markdown(f"""<div class='pb-card'><div style="display:flex;align-items:center;gap:20px;"><div style="width:80px;height:50px;border-radius:5px;background-image:url('data:image/png;base64,{b64_map}');background-size:contain;background-position:center;border:1px solid #444;"></div><div><div style="color:#00BFFF;font-weight:bold;font-size:1.1em;text-transform:uppercase;">{row['Name']}</div><div style="color:#666;font-size:0.8em;">{row['Map']}</div></div><div style="margin-left:auto;padding-right:10px;">{ag_html}</div></div></div>""", unsafe_allow_html=True)
@@ -2120,10 +2297,455 @@ elif page == "📘 STRATEGY BOARD":
 
         else:
             # Single Playbook
+            # Safety Check: Ensure playbook exists and data is loaded
+            if df_team_pb.empty or 'ID' not in df_team_pb.columns or st.session_state['sel_pb_id'] not in df_team_pb['ID'].values:
+                st.warning("Playbook not found (or data is reloading). Returning to lobby.")
+                st.session_state['sel_pb_id'] = None
+                st.rerun()
+
             pb = df_team_pb[df_team_pb['ID'] == st.session_state['sel_pb_id']].iloc[0]
+            # Define my_strats BEFORE using it in the export button
+            my_strats = df_pb_strats[df_pb_strats['PB_ID'] == pb['ID']]
+            
             st.button("⬅ BACK TO LOBBY", on_click=lambda: st.session_state.update({'sel_pb_id': None}))
             
             header_col1, header_col2 = st.columns([1, 4])
+
+            # --- EXPORT FUNCTIONALITY ---
+            with st.expander("🚀 Export Playbook to Presentation"):
+                missing_libs = []
+                if not HAS_PPTX: missing_libs.append("python-pptx")
+                if not HAS_FPDF: missing_libs.append("fpdf")
+
+                if missing_libs:
+                    libs_str = " ".join(missing_libs)
+                    st.error(f"⚠️ Fehlende Bibliotheken: {', '.join(missing_libs)}\n\n"
+                             "Mögliche Lösung:\n"
+                             "1. Stoppe den Server (Ctrl+C).\n"
+                             "2. Stelle sicher, dass dein venv aktiv ist.\n"
+                             f"3. Führe aus: `pip install {libs_str}`\n"
+                             "4. Starte neu: `streamlit run app.py`")
+                else:
+                    st.info("Anleitung:")
+                    st.markdown("""
+                    1.  **Erstelle eine PowerPoint-Vorlage:**
+                        *   Gestalte eine Titelfolie. Du kannst `{{PLAYBOOK_NAME}}` und `{{MAP_NAME}}` als Platzhalter für Text verwenden.
+                        *   Gehe zu **Ansicht -> Folienmaster** und erstelle ein neues **Layout**. Benenne dieses Layout exakt in `Strat Layout` um.
+                        *   Füge auf dem `Strat Layout` Platzhalter hinzu: einen **Titel**, ein **Inhalt**- oder **Text**-Feld (für Protokolle) und einen **Bild**-Platzhalter.
+                        *   *Optional:* Füge auf der Titelfolie einen **Bild-Platzhalter** für die Agenten hinzu. Das Map-Bild wird automatisch als abgedunkelter Hintergrund gesetzt.
+                    2.  **Hochladen & Generieren:** Lade deine Vorlage unten hoch und klicke auf Generieren. Die App erstellt für jede Strategie in diesem Playbook eine neue Folie.
+                    """)
+                    template_file = st.file_uploader("Upload your PowerPoint Template (.pptx)", type="pptx")
+                    pdf_bg_file = st.file_uploader("Optional: Upload PDF Background Design (Image A4 Landscape)", type=['png', 'jpg'], help="This image will be used as the background for every page in the PDF.")
+
+                    c_pptx, c_pdf = st.columns(2)
+
+                    if template_file:
+                        def generate_presentation(template, playbook_data, strats_data):
+                            # Import locally to ensure it works if global import failed but library exists now
+                            import pptx
+                            from pptx.enum.shapes import PP_PLACEHOLDER_TYPE
+                            prs = pptx.Presentation(template)
+                            
+                            # Find the custom layout
+                            strat_layout = next((lo for lo in prs.slide_layouts if lo.name == 'Strat Layout'), None)
+                            if not strat_layout:
+                                st.error("Template Error: A slide layout named 'Strat Layout' was not found in your template. Please check the instructions.")
+                                return None
+
+                            # --- Populate Title Slide (optional) ---
+                            title_slide = prs.slides[0]
+                            
+                            # Text Replacements
+                            for shape in title_slide.shapes:
+                                if not shape.has_text_frame: continue
+                                if '{{PLAYBOOK_NAME}}' in shape.text:
+                                    shape.text = shape.text.replace('{{PLAYBOOK_NAME}}', playbook_data['Name'])
+                                if '{{MAP_NAME}}' in shape.text:
+                                    shape.text = shape.text.replace('{{MAP_NAME}}', playbook_data['Map'])
+                            
+                            # 1. Map Image as Background (Dimmed)
+                            map_path = get_map_img(playbook_data['Map'], 'list')
+                            if map_path:
+                                try:
+                                    with Image.open(map_path) as img:
+                                        enhancer = ImageEnhance.Brightness(img)
+                                        dimmed_img = enhancer.enhance(0.7) # Reduce brightness by 30%
+                                        output = io.BytesIO()
+                                        dimmed_img.save(output, format="PNG")
+                                        output.seek(0)
+                                        title_slide.background.fill.user_picture(output)
+                                except Exception as e:
+                                    print(f"Error setting background: {e}")
+
+                            # 2. Agents Composite (Insert into first available picture placeholder)
+                            # FIX: Allow Object/Content placeholders too, and ensure we find them
+                            pic_placeholders = []
+                            for s in title_slide.placeholders:
+                                if s.placeholder_format.type in [PP_PLACEHOLDER_TYPE.PICTURE, PP_PLACEHOLDER_TYPE.OBJECT]:
+                                    pic_placeholders.append(s)
+                            
+                            if len(pic_placeholders) > 0:
+                                agents = [playbook_data.get(f'Agent_{i}') for i in range(1,6)]
+                                comp_img = create_team_composite(agents)
+                                if comp_img: pic_placeholders[0].insert_picture(comp_img)
+
+                            # --- Create a slide for each strat ---
+                            for _, strat in strats_data.iterrows():
+                                slide = prs.slides.add_slide(strat_layout)
+                                
+                                # Set Title
+                                if slide.shapes.title: slide.shapes.title.text = strat['Name']
+                                
+                                # Set Protocols in Body
+                                try: protos = json.loads(strat['Protocols'])
+                                except: protos = []
+                                body_text = "\n".join([f"• IF: {p['trigger']} -> THEN: {p['reaction']}" for p in protos])
+                                    
+                                # Find Placeholders dynamically (Robust against different template indices)
+                                body_ph = None
+                                pic_ph = None
+                                
+                                for shape in slide.placeholders:
+                                    # Skip Title
+                                    if slide.shapes.title and shape.shape_id == slide.shapes.title.shape_id: continue
+                                    
+                                    ph_type = shape.placeholder_format.type
+                                    if ph_type == PP_PLACEHOLDER_TYPE.PICTURE:
+                                        pic_ph = shape
+                                    elif ph_type in [PP_PLACEHOLDER_TYPE.BODY, PP_PLACEHOLDER_TYPE.OBJECT]:
+                                        if not body_ph: body_ph = shape
+                                
+                                # Set Text
+                                if body_ph: body_ph.text = body_text
+
+                                # Insert Image
+                                img_path = os.path.join(STRAT_IMG_DIR, strat['Image'])
+                                if pic_ph and os.path.exists(img_path):
+                                    pic_ph.insert_picture(img_path)
+                                    
+                                    # Add Notes
+                                    if pd.notna(strat.get('Notes')) and strat['Notes']:
+                                        if not slide.has_notes_slide: slide.notes_slide
+                                        slide.notes_slide.notes_text_frame.text = strat['Notes']
+
+                            # Save to buffer
+                            bio = io.BytesIO()
+                            prs.save(bio)
+                            return bio.getvalue()
+
+                        with c_pptx:
+                            st.download_button(
+                                label="⬇️ Download PowerPoint",
+                                data=generate_presentation(template_file, pb, my_strats),
+                                file_name=f"{pb['Name']}_Playbook.pptx",
+                                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                            )
+                
+                # PDF EXPORT
+                if HAS_FPDF:
+                    # --- PRESETS LOGIC ---
+                    presets = {}
+                    if os.path.exists(PRESETS_FILE):
+                        try:
+                            with open(PRESETS_FILE, 'r') as f: presets = json.load(f)
+                        except: pass
+
+                    # --- LAYOUT SETTINGS UI ---
+                    layout_cfg = {}
+                    with st.expander("🎨 PDF Layout Customization (Strategy Slides)"):
+                        st.caption("Adjust positions (mm) and styles. Canvas size: ~339mm x 190mm.")
+                        
+                        # Preset Selector
+                        c_pre, c_save = st.columns([2, 1])
+                        sel_preset = c_pre.selectbox("Load Preset", ["Default"] + list(presets.keys()))
+                        
+                        default_layout = {'img_x':10, 'img_y':35, 'img_w':210, 'img_h':118, 'proto_x':228, 'proto_y':35, 'note_x':10, 'note_y':160, 'note_w': 80, 'title_x':10, 'title_y':10, 'title_size':24, 'title_color':'#FFFFFF', 'proto_size':12, 'if_color':'#00BFFF', 'then_color':'#FFFFFF', 'logo_x':10, 'logo_y':10, 'logo_w':20, 'tag_color': '#00BFFF', 'note_color': '#FFFFFF'}
+                        
+                        current_defaults = default_layout.copy()
+                        if sel_preset != "Default" and sel_preset in presets:
+                            current_defaults.update(presets[sel_preset])
+                        
+                        t1, t2, t3 = st.tabs(["📏 Positions & Sizes", "🎨 Colors & Fonts", "🖼️ Logo & Extras"])
+                        
+                        with t1:
+                            l1, l2 = st.columns(2)
+                            with l1:
+                                st.markdown("**🖼️ Image Box**")
+                                layout_cfg['img_x'] = st.number_input("Img X", value=current_defaults['img_x'])
+                                layout_cfg['img_y'] = st.number_input("Img Y", value=current_defaults['img_y'])
+                                layout_cfg['img_w'] = st.number_input("Img Width", value=current_defaults['img_w'])
+                                layout_cfg['img_h'] = st.number_input("Img Height", value=current_defaults['img_h'])
+                                st.markdown("**📝 Notes**")
+                                layout_cfg['note_x'] = st.number_input("Note X", value=current_defaults['note_x'])
+                                layout_cfg['note_y'] = st.number_input("Note Y", value=current_defaults['note_y'])
+                                layout_cfg['note_w'] = st.number_input("Note Width (0=Full)", value=current_defaults.get('note_w', 80))
+                            with l2:
+                                st.markdown("**⚡ Protocols**")
+                                layout_cfg['proto_x'] = st.number_input("Proto X", value=current_defaults['proto_x'])
+                                layout_cfg['proto_y'] = st.number_input("Proto Y", value=current_defaults['proto_y'])
+                                st.markdown("**🏷️ Title**")
+                                layout_cfg['title_x'] = st.number_input("Title X", value=current_defaults['title_x'])
+                                layout_cfg['title_y'] = st.number_input("Title Y", value=current_defaults['title_y'])
+                        
+                        with t2:
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                layout_cfg['title_size'] = st.number_input("Title Font Size", value=current_defaults.get('title_size', 24))
+                                layout_cfg['title_color'] = st.color_picker("Title Color", current_defaults.get('title_color', '#FFFFFF'))
+                                layout_cfg['tag_color'] = st.color_picker("Tag Color", current_defaults.get('tag_color', '#00BFFF'))
+                            with c2:
+                                layout_cfg['proto_size'] = st.number_input("Protocol Font Size", value=current_defaults.get('proto_size', 12))
+                                layout_cfg['if_color'] = st.color_picker("IF Color (Bold)", current_defaults.get('if_color', '#00BFFF'))
+                                layout_cfg['then_color'] = st.color_picker("THEN Color", current_defaults.get('then_color', '#FFFFFF'))
+                                layout_cfg['note_color'] = st.color_picker("Notes Color", current_defaults.get('note_color', '#FFFFFF'))
+                        
+                        with t3:
+                            st.markdown("**Logo Settings**")
+                            c1, c2, c3 = st.columns(3)
+                            layout_cfg['logo_x'] = c1.number_input("Logo X", value=current_defaults.get('logo_x', 10))
+                            layout_cfg['logo_y'] = c2.number_input("Logo Y", value=current_defaults.get('logo_y', 10))
+                            layout_cfg['logo_w'] = c3.number_input("Logo Width", value=current_defaults.get('logo_w', 20))
+
+                        # Save Preset
+                        with c_save:
+                            new_preset_name = st.text_input("Save as Preset", placeholder="Name...")
+                            if st.button("💾 Save"):
+                                if new_preset_name:
+                                    presets[new_preset_name] = layout_cfg
+                                    with open(PRESETS_FILE, 'w') as f: json.dump(presets, f)
+                                    st.success("Saved!")
+                                    st.rerun()
+
+                        if st.button("👁️ Preview Layout"):
+                            # 16:9 Aspect Ratio (338.7mm x 190.5mm) -> Scale for Preview
+                            scale = 3
+                            w_px = int(338.7 * scale)
+                            h_px = int(190.5 * scale)
+                            
+                            # Create Canvas
+                            img = Image.new("RGB", (w_px, h_px), "#e0e0e0")
+                            draw = ImageDraw.Draw(img)
+                            
+                            def draw_rect(x, y, w, h, color, text):
+                                x_px, y_px = int(x*scale), int(y*scale)
+                                w_px, h_px = int(w*scale), int(h*scale)
+                                draw.rectangle([x_px, y_px, x_px+w_px, y_px+h_px], fill=color, outline="#333", width=2)
+                                draw.text((x_px+10, y_px+10), text, fill="#000")
+
+                            # Draw Elements
+                            # 1. Title (Approx 200mm width)
+                            draw_rect(layout_cfg['title_x'], layout_cfg['title_y'], 200, 15, "#ffcccb", "TITLE")
+                            
+                            # 2. Image (Height fixed, assume 16:9 ratio for width)
+                            draw_rect(layout_cfg['img_x'], layout_cfg['img_y'], layout_cfg['img_w'], layout_cfg['img_h'], "#90ee90", "STRAT IMAGE")
+                            
+                            # 3. Protocols (Fixed width 100mm in code)
+                            draw_rect(layout_cfg['proto_x'], layout_cfg['proto_y'], 100, 120, "#add8e6", "PROTOCOLS")
+                            
+                            # 4. Notes (Full width remaining)
+                            note_w = layout_cfg.get('note_w', 0) if layout_cfg.get('note_w', 0) > 0 else (338.7 - layout_cfg['note_x'] - 10)
+                            draw_rect(layout_cfg['note_x'], layout_cfg['note_y'], note_w, 20, "#ffffe0", "NOTES")
+                            
+                            st.image(img, caption="Layout Preview (Canvas 16:9)", use_container_width=True)
+
+                    def generate_pdf_report(playbook_data, strats_data, bg_image=None, layout=None):
+                        from fpdf import FPDF
+                        # ⚙️ PDF SETTINGS (RESOLUTION / FORMAT)
+                        # 16:9 Aspect Ratio (Standard PPT Widescreen: 338.7mm x 190.5mm)
+                        # This matches the 1920x1080 aspect ratio requested.
+                        pdf = FPDF(orientation='L', unit='mm', format=(190.5, 338.7))
+                        pdf.set_auto_page_break(auto=True, margin=15)
+                        
+                        # Default Layout if None
+                        if layout is None:
+                            layout = default_layout.copy()
+
+                        def hex_to_rgb(hex_col):
+                            hex_col = hex_col.lstrip('#')
+                            return tuple(int(hex_col[i:i+2], 16) for i in (0, 2, 4))
+
+                        # --- FONTS ---
+                        # Try to register Nunito if available in assets/fonts
+                        font_family = "Arial"
+                        try:
+                            font_dir = os.path.join(ASSET_DIR, "fonts")
+                            if os.path.exists(os.path.join(font_dir, "Nunito-Regular.ttf")):
+                                pdf.add_font("Nunito", "", os.path.join(font_dir, "Nunito-Regular.ttf"), uni=True)
+                                pdf.add_font("Nunito", "B", os.path.join(font_dir, "Nunito-Bold.ttf"), uni=True)
+                                font_family = "Nunito"
+                        except Exception as e:
+                            print(f"Font loading error: {e}")
+
+                        # Handle Background Image (Save to temp file if uploaded)
+                        bg_path = None
+                        if bg_image:
+                            bg_path = "temp_pdf_bg.png"
+                            with open(bg_path, "wb") as f:
+                                f.write(bg_image.getbuffer())
+                        
+                        # --- TITLE PAGE ---
+                        pdf.add_page()
+                        pdf.set_fill_color(10, 10, 20) # Dark BG
+                        pdf.rect(0, 0, pdf.w, pdf.h, 'F')
+                        
+                        # Title Slide ALWAYS uses Map Background (Dimmed) as requested
+                        # Check assets/playbook/[map].png first
+                        map_clean = str(playbook_data['Map']).lower().strip()
+                        playbook_bg = os.path.join(ASSET_DIR, "playbook", f"{map_clean}.png")
+                        
+                        if os.path.exists(playbook_bg):
+                            map_path = playbook_bg
+                        else:
+                            map_path = get_map_img(playbook_data['Map'], 'list')
+
+                        if map_path:
+                            try:
+                                # 🛠️ DIMMING LOGIC (30% reduced brightness)
+                                with Image.open(map_path) as img:
+                                    enhancer = ImageEnhance.Brightness(img)
+                                    dimmed_img = enhancer.enhance(0.7) # 0.7 = 70% brightness (30% reduced)
+                                    
+                                    temp_map_bg = "temp_map_bg_pdf.png"
+                                    dimmed_img.save(temp_map_bg)
+                                    
+                                    # Position: x=0, y=0 (Top Left), w=Page Width, h=Page Height
+                                    pdf.image(temp_map_bg, x=0, y=0, w=pdf.w, h=pdf.h)
+                            except Exception as e:
+                                print(f"PDF BG Error: {e}")
+                                # Fallback if dimming fails
+                                pdf.image(map_path, x=0, y=0, w=pdf.w, h=pdf.h)
+                        
+                        # Title
+                        pdf.set_y(80) # Move title down to 80mm from top
+                        pdf.set_font(font_family, "B", 50)
+                        pdf.set_text_color(255, 255, 255)
+                        pdf.cell(0, 20, txt=playbook_data['Name'], ln=True, align='C')
+                        
+                        pdf.ln(5) # Add 5mm vertical space
+                        pdf.set_font(font_family, "B", 24)
+                        pdf.set_text_color(0, 191, 255) # Cyan
+                        pdf.cell(0, 10, txt=playbook_data['Map'].upper(), ln=True, align='C')
+                        
+                        # Agents
+                        agents = [playbook_data.get(f'Agent_{i}') for i in range(1,6)]
+                        comp_img = create_team_composite(agents)
+                        if comp_img:
+                            # Save temp to include in PDF
+                            with open("temp_comp.png", "wb") as f: f.write(comp_img.getbuffer())
+                            pdf.image("temp_comp.png", x=(pdf.w-150)/2, y=140, w=150)
+                        
+                        # --- STRAT PAGES ---
+                        for _, strat in strats_data.iterrows():
+                            pdf.add_page()
+                            pdf.set_fill_color(240, 240, 240)
+                            pdf.rect(0, 0, pdf.w, pdf.h, 'F')
+                            
+                            # Apply Custom Background to strat pages too if provided
+                            if bg_path:
+                                pdf.image(bg_path, x=0, y=0, w=pdf.w, h=pdf.h)
+                            
+                            # Logo
+                            if os.path.exists("logo.png"):
+                                try:
+                                    with Image.open("logo.png") as l_img:
+                                        enh = ImageEnhance.Brightness(l_img)
+                                        l_dim = enh.enhance(0.6) # 40% reduced brightness
+                                        l_dim.save("temp_logo_dim.png")
+                                    pdf.image("temp_logo_dim.png", x=layout.get('logo_x', 10), y=layout.get('logo_y', 10), w=layout.get('logo_w', 20))
+                                except: pass
+                            
+                            # Header
+                            pdf.set_xy(layout['title_x'], layout['title_y'])
+                            pdf.set_font(font_family, "B", layout.get('title_size', 24))
+                            
+                            # Title Color
+                            tr, tg, tb = hex_to_rgb(layout.get('title_color', '#FFFFFF'))
+                            pdf.set_text_color(tr, tg, tb)
+                            
+                            pdf.cell(0, 20, txt=strat['Name'], ln=True)
+                            
+                            # Tag (Below Title)
+                            if pd.notna(strat.get('Tag')) and strat['Tag']:
+                                pdf.set_xy(layout['title_x'], layout['title_y'] + 12)
+                                pdf.set_font(font_family, "I", layout.get('title_size', 24) * 0.6) # Smaller font for tag
+                                
+                                # Tag Color
+                                tr, tg, tb = hex_to_rgb(layout.get('tag_color', '#00BFFF'))
+                                pdf.set_text_color(tr, tg, tb)
+                                
+                                pdf.cell(0, 10, txt=f"{strat['Tag']}", ln=True)
+                            
+                            # Image
+                            img_path = os.path.join(STRAT_IMG_DIR, strat['Image'])
+                            if os.path.exists(img_path):
+                                # Scale preserving aspect ratio (Fit within box)
+                                try:
+                                    with Image.open(img_path) as img_pil:
+                                        orig_w, orig_h = img_pil.size
+                                    
+                                    box_w = layout.get('img_w', 210)
+                                    box_h = layout['img_h']
+                                    scale = min(box_w/orig_w, box_h/orig_h)
+                                    new_w, new_h = orig_w * scale, orig_h * scale
+                                    
+                                    # Bottom Right Alignment in Box
+                                    # X = layout['img_x'] + box_w - new_w (Right)
+                                    # Y = layout['img_y'] + box_h - new_h (Bottom)
+                                    pdf.image(img_path, x=layout['img_x'] + box_w - new_w, y=layout['img_y'] + box_h - new_h, w=new_w, h=new_h)
+                                except:
+                                    pdf.image(img_path, x=layout['img_x'], y=layout['img_y'], w=layout.get('img_w', 210), h=layout['img_h'])
+                            
+                            # Protocols
+                            pdf.set_xy(layout['proto_x'], layout['proto_y'])
+                            pdf.set_font(font_family, "B", layout.get('proto_size', 12) + 4) # Header slightly larger
+                            # Header Color (Use Title Color or separate?) Let's use Title Color for consistency or IF color
+                            tr, tg, tb = hex_to_rgb(layout.get('title_color', '#FFFFFF'))
+                            pdf.set_text_color(tr, tg, tb)
+                            pdf.cell(100, 10, txt="PROTOCOLS", ln=True)
+                            
+                            try: protos = json.loads(strat['Protocols'])
+                            except: protos = []
+                            
+                            if_rgb = hex_to_rgb(layout.get('if_color', '#00BFFF'))
+                            then_rgb = hex_to_rgb(layout.get('then_color', '#FFFFFF'))
+                            
+                            for p in protos:
+                                pdf.set_x(layout['proto_x'])
+                                # IF (Bold + Color)
+                                pdf.set_font(font_family, "B", layout.get('proto_size', 12))
+                                pdf.set_text_color(*if_rgb)
+                                pdf.multi_cell(100, 6, txt=f"IF: {p['trigger']}", border=0)
+                                
+                                # THEN (Normal + Color)
+                                pdf.set_x(layout['proto_x'])
+                                pdf.set_font(font_family, "", layout.get('proto_size', 12))
+                                pdf.set_text_color(*then_rgb)
+                                pdf.multi_cell(100, 6, txt=f"-> {p['reaction']}", border=0)
+                                
+                                pdf.ln(3)
+                            
+                            # Notes
+                            if pd.notna(strat.get('Notes')) and strat['Notes']:
+                                pdf.set_xy(layout['note_x'], layout['note_y'])
+                                
+                                # Note Color
+                                nr, ng, nb = hex_to_rgb(layout.get('note_color', '#FFFFFF'))
+                                pdf.set_text_color(nr, ng, nb)
+                                
+                                pdf.set_font(font_family, "", 12)
+                                pdf.multi_cell(layout.get('note_w', 0), 6, txt=strat['Notes'])
+
+                        return pdf.output(dest='S').encode('latin-1')
+                    
+                    with c_pdf:
+                        st.download_button(
+                            label="⬇️ Download PDF Report",
+                            data=generate_pdf_report(pb, my_strats, pdf_bg_file, layout_cfg),
+                            file_name=f"{pb['Name']}_Playbook.pdf",
+                            mime="application/pdf"
+                        )
+
             with header_col1: st.image(get_map_img(pb['Map'], 'list'), width='stretch')
             with header_col2:
                 st.markdown(f"<h1 style='margin:0'>{pb['Name']} <span style='font-size:0.5em; color:#666'>//{pb['Map']}</span></h1>", unsafe_allow_html=True)
@@ -2131,214 +2753,145 @@ elif page == "📘 STRATEGY BOARD":
                 for i in range(1,6):
                     ag = pb.get(f'Agent_{i}'); 
                     if ag: cols[i-1].image(get_agent_img(ag), width=50)
+                    if ag: 
+                        b64 = get_styled_agent_img_b64(ag)
+                        if b64: cols[i-1].image(f"data:image/png;base64,{b64}", width=50)
 
-            st.divider(); my_strats = df_pb_strats[df_pb_strats['PB_ID'] == pb['ID']]
+            st.divider()
             
             with st.expander("➕ ADD NEW STRATEGY / SET PLAY (IMAGE UPLOAD)"):
+                # 1. Paste Button (Outside Form for immediate feedback)
+                pasted_image = None
+                if HAS_CLIPBOARD:
+                    pasted_image = paste(label="📋 Click to Paste Image (from Clipboard)", key=f"paste_{pb['ID']}")
+                    if pasted_image:
+                        st.success("Image captured from clipboard!")
+                else:
+                    st.warning(f"Clipboard feature unavailable. Error: {CLIPBOARD_ERR}\n\nTry restarting the app if you just installed `st-img-pastebutton`.")
+
                 with st.form("add_pb_strat"):
-                    sn = st.text_input("Strategy Name")
-                    si = st.file_uploader("Sketch", type=['png', 'jpg'])
+                    c_name, c_tag = st.columns([3, 1])
+                    sn = c_name.text_input("Strategy Name")
+                    s_tag = c_tag.selectbox("Tag", ["Default", "Set Play", "Pistol", "Eco", "Anti-Eco", "Bonus", "Retake"])
+                    s_note = st.text_area("Notes (Optional)")
+                    
+                    si = st.file_uploader("Or Upload a File", type=['png', 'jpg'])
+
                     if st.form_submit_button("Add"):
-                        if sn and si:
+                        image_data = None
+                        if pasted_image:
+                            # Handle pasted image data (usually base64 string)
+                            if isinstance(pasted_image, str):
+                                try:
+                                    # Remove header if present (e.g., "data:image/png;base64,...")
+                                    if "," in pasted_image:
+                                        pasted_image = pasted_image.split(",")[1]
+                                    # Fix padding if necessary
+                                    missing_padding = len(pasted_image) % 4
+                                    if missing_padding: pasted_image += '=' * (4 - missing_padding)
+                                    image_data = base64.b64decode(pasted_image)
+                                except: pass
+                            else:
+                                image_data = pasted_image
+                        elif si:
+                            image_data = si.getvalue()
+
+                        if sn and image_data:
                             fname = f"PB_{pb['ID'][:8]}_{sn}_{int(datetime.now().timestamp())}.png".replace(" ", "_")
-                            with open(os.path.join(STRAT_IMG_DIR, fname), "wb") as f: f.write(si.getbuffer())
-                            new_strat = {'PB_ID': pb['ID'], 'Strat_ID': str(uuid.uuid4()), 'Name': sn, 'Image': fname, 'Protocols': '[]'}
+                            max_order = df_pb_strats[df_pb_strats['PB_ID'] == pb['ID']]['Order'].max()
+                            new_order = max_order + 1 if pd.notna(max_order) else 0
+                            with open(os.path.join(STRAT_IMG_DIR, fname), "wb") as f: f.write(image_data)
+                            new_strat = {'PB_ID': pb['ID'], 'Strat_ID': str(uuid.uuid4()), 'Name': sn, 'Image': fname, 'Protocols': '[]', 'Notes': s_note, 'Tag': s_tag, 'Order': new_order}
                             
                             updated = pd.concat([df_pb_strats, pd.DataFrame([new_strat])], ignore_index=True)
                             save_pb_strats(updated)
                             st.rerun()
+                        else:
+                            st.error("A Strategy Name and an Image (pasted or uploaded) are required.")
 
             if not my_strats.empty:
-                for idx, strat in my_strats.iterrows():
+                # Sort by Order
+                my_strats_sorted = my_strats.sort_values('Order')
+                
+                for idx, strat in my_strats_sorted.iterrows():
                     with st.container():
-                        c_img, c_proto = st.columns([1.5, 1])
-                        with c_img:
-                            st.subheader(f"📍 {strat['Name']}")
-                            spath = os.path.join(STRAT_IMG_DIR, strat['Image'])
-                            if os.path.exists(spath): st.image(spath, use_container_width=True)
-                        with c_proto:
-                            st.markdown("### ⚡ PROTOCOLS")
-                            try: protos = json.loads(strat['Protocols'])
-                            except: protos = []
-                            if protos:
-                                for p in protos: st.markdown(f"""<div class="proto-box"><div class="proto-if">IF: {p['trigger']}</div><div class="proto-then">👉 {p['reaction']}</div></div>""", unsafe_allow_html=True)
-                            else: st.caption("No protocols defined.")
-                            
-                            with st.popover(f"Edit Protocols"):
-                                with st.form(f"pf_{strat['Strat_ID']}"):
-                                    trig = st.text_input("IF (Trigger)"); react = st.text_input("THEN (Reaction)")
-                                    if st.form_submit_button("Add"):
-                                        protos.append({'trigger': trig, 'reaction': react})
-                                        df_pb_strats.loc[df_pb_strats['Strat_ID'] == strat['Strat_ID'], 'Protocols'] = json.dumps(protos)
-                                        save_pb_strats(df_pb_strats)
-                                        st.rerun()
-                                if st.button("Clear Protocols", key=f"clr_{strat['Strat_ID']}"):
-                                    df_pb_strats.loc[df_pb_strats['Strat_ID'] == strat['Strat_ID'], 'Protocols'] = '[]'
+                        # Layout: Up/Down | Content
+                        c_nav, c_content = st.columns([0.5, 10])
+                        
+                        with c_nav:
+                            if st.button("⬆️", key=f"up_{strat['Strat_ID']}"):
+                                current_order = strat['Order']
+                                # Find prev strat
+                                prev = my_strats_sorted[my_strats_sorted['Order'] < current_order].sort_values('Order', ascending=False).head(1)
+                                if not prev.empty:
+                                    prev_idx = prev.index[0]
+                                    prev_order = prev.iloc[0]['Order']
+                                    
+                                    # Swap in main DF
+                                    df_pb_strats.at[idx, 'Order'] = prev_order
+                                    df_pb_strats.at[prev_idx, 'Order'] = current_order
                                     save_pb_strats(df_pb_strats)
                                     st.rerun()
-                        st.divider()
+                                    
+                            if st.button("⬇️", key=f"dn_{strat['Strat_ID']}"):
+                                current_order = strat['Order']
+                                # Find next strat
+                                nxt = my_strats_sorted[my_strats_sorted['Order'] > current_order].sort_values('Order', ascending=True).head(1)
+                                if not nxt.empty:
+                                    nxt_idx = nxt.index[0]
+                                    nxt_order = nxt.iloc[0]['Order']
+                                    
+                                    # Swap
+                                    df_pb_strats.at[idx, 'Order'] = nxt_order
+                                    df_pb_strats.at[nxt_idx, 'Order'] = current_order
+                                    save_pb_strats(df_pb_strats)
+                                    st.rerun()
 
-    # --------------------------------------------------------------------------
-    # TAB 2: TACTICAL WHITEBOARD (100% CORRECTED)
-    # --------------------------------------------------------------------------
-    with tab_whiteboard:
-        st.subheader("TACTICAL BOARD")
-        
-        # --- VISUAL MAP SELECTOR ---
-        if 'wb_map_sel' not in st.session_state: st.session_state.wb_map_sel = "Ascent"
-        with st.expander("🗺️ MAP SELECTION", expanded=False):
-            render_visual_selection(sorted(df['Map'].unique()) if not df.empty else ["Ascent"], 'map', 'wb_m', multi=False, key_state='wb_map_sel')
-        wb_map = st.session_state.wb_map_sel
-
-        # --- VISUAL AGENT SELECTOR ---
-        agent_files = glob.glob(os.path.join(ASSET_DIR, "agents", "*.png"))
-        agent_options = [os.path.basename(x).replace('.png', '') for x in agent_files] if agent_files else []
-        
-        if 'wb_agent_sel' not in st.session_state: st.session_state.wb_agent_sel = agent_options[0] if agent_options else None
-        with st.expander("♟️ AGENT ICON (for placement)", expanded=False):
-             render_visual_selection(agent_options, 'agent', 'wb_a', multi=False, key_state='wb_agent_sel')
-        selected_agent = st.session_state.wb_agent_sel
-        
-        st.divider()
-        
-        st.markdown("#### 2. WERKZEUG")
-        # --- FIX: NUR GÜLTIGE WERKZEUGE (KEIN ARROW/TEXT!) ---
-        tool_map = {
-            "Linie (Laufweg/Wall)": "line",
-            "Rechteck (Area)": "rect",
-            "Kreis (Smoke/Zone)": "circle",
-            "Agent (Platzierung)": "agent",
-            "Stift (Freihand)": "freedraw",
-            "Maus (Bewegen)": "transform"
-        }
-        tool_select = st.radio("Tool wählen:", list(tool_map.keys()), index=0)
-        mode = tool_map[tool_select]
-        
-        # Toggle für gerade Linien
-        force_straight = st.checkbox("Gerade Linien erzwingen", key="force_straight")
-        if force_straight and mode == "freedraw":
-            mode = "line"
-        
-        st.divider()
-        
-        st.markdown("#### 3. TAKTIK-FARBEN")
-        color_presets = {
-            "🟥 ATTACK / T (#FF4655)": "#FF4655",
-            "🟦 DEFENSE / CT (#00FFFF)": "#00FFFF",
-            "⬜ INFO / TEXT (#FFFFFF)": "#FFFFFF",
-            "☁️ SMOKE (#DDDDDD)": "#DDDDDD",
-            "🟩 VIPER / TOXIC (#00FF00)": "#00FF00",
-            "🟨 KJ / FLASH (#FFD700)": "#FFD700",
-            "⬛ SHADOW / DARK (#000000)": "#000000"
-        }
-        c_name = st.selectbox("Farbe:", list(color_presets.keys()))
-        stroke_color = color_presets[c_name]
-        
-        stroke_width = st.slider("Linienstärke", 1, 8, 3)
-        
-        st.divider()
-        
-        st.markdown("#### 4. SPEICHERN")
-        strat_name = st.text_input("Name der Taktik", placeholder="z.B. B Rush Pistol")
-        
-        map_pbs = df_team_pb[df_team_pb['Map'] == wb_map]
-        assign_pb = st.selectbox("Zu Playbook hinzufügen:", ["Keins"] + list(map_pbs['Name'].unique()) if not map_pbs.empty else ["Keins"])
-
-        # Persist canvas drawing across tool changes
-        if 'canvas_drawing' not in st.session_state:
-            st.session_state.canvas_drawing = {}
-        initial_drawing = st.session_state.canvas_drawing
-        
-        # BILD VORBEREITUNG
-        bg_image_path = get_map_img(wb_map, 'icon')
-        pil_image = None
-        bg_url = None
-        
-        if bg_image_path and os.path.exists(bg_image_path):
-            try:
-                loaded = Image.open(bg_image_path)
-                pil_image = loaded.convert("RGBA")
-                pil_image = pil_image.resize((700, 700))
-            except Exception as e:
-                st.error(f"Fehler beim Laden des Bildes: {e}")
-
-            st.markdown("""
-            <style>
-            [data-testid="stCanvas"] {
-                border: 2px solid #333;
-                border-radius: 5px;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-            }
-            </style>
-            """, unsafe_allow_html=True)
-
-            canvas_result = st_canvas(
-                fill_color=stroke_color + "44",  
-                stroke_width=stroke_width,
-                stroke_color=stroke_color,
-                background_color=None, 
-                background_image=pil_image, 
-                update_streamlit=True,
-                height=700,
-                width=700, 
-                drawing_mode="circle" if mode == "agent" else mode,
-                point_display_radius=0,
-                display_toolbar=True,
-                initial_drawing=initial_drawing
-            )
-            
-            # Update session state with current drawing
-            st.session_state.canvas_drawing = canvas_result.json_data if canvas_result.json_data else {}
-            
-            if st.button("💾 SAVE STRATEGY", type="primary"):
-                if canvas_result.image_data is not None and strat_name:
-                    img_data = canvas_result.image_data.astype("uint8")
-                    im = Image.fromarray(img_data)
-                    
-                    # Overlay agent images on circles if agent selected
-                    if selected_agent and canvas_result.json_data:
-                        agent_path = os.path.join(ASSET_DIR, "agents", selected_agent + ".png")
-                        if os.path.exists(agent_path):
-                            agent_img = Image.open(agent_path)
-                            for obj in canvas_result.json_data['objects']:
-                                if obj['type'] == 'circle':
-                                    x = obj['left'] + obj['width'] / 2
-                                    y = obj['top'] + obj['height'] / 2
-                                    radius = obj['width'] / 2
-                                    size = int(radius * 2)
-                                    if size > 0:
-                                        resized_agent = agent_img.resize((size, size))
-                                        im.paste(resized_agent, (int(x - radius), int(y - radius)), resized_agent if resized_agent.mode == 'RGBA' else None)
-                    
-                    fname = f"STRAT_{wb_map}_{strat_name}_{int(datetime.now().timestamp())}.png".replace(" ", "_")
-                    im.save(os.path.join(STRAT_IMG_DIR, fname))
-                    
-                    if assign_pb != "Keins":
-                        pb_id = df_team_pb[df_team_pb['Name']==assign_pb].iloc[0]['ID']
-                        new_entry = {
-                            'PB_ID': pb_id, 
-                            'Strat_ID': str(uuid.uuid4()), 
-                            'Name': strat_name, 
-                            'Image': fname, 
-                            'Protocols': '[]'
-                        }
-                        updated = pd.concat([df_pb_strats, pd.DataFrame([new_entry])], ignore_index=True)
-                        save_pb_strats(updated)
-                        st.success(f"Gespeichert in Playbook: {assign_pb}")
-                    else:
-                        st.success(f"Bild gespeichert als {fname}")
-                else:
-                    st.error("Bitte gib der Taktik einen Namen!")
-        else:
-            st.error(f"⚠️ Kein Map-Bild gefunden für {wb_map}.")
-            st.info(f"Suche nach: assets/maps/{str(wb_map).lower()}_icon.png")
+                        with c_content:
+                            c_img, c_proto = st.columns([1.5, 1])
+                            with c_img:
+                                st.subheader(f"📍 {strat['Name']}  `{strat.get('Tag', 'Default')}`")
+                                spath = os.path.join(STRAT_IMG_DIR, strat['Image'])
+                                if os.path.exists(spath): st.image(spath, use_container_width=True)
+                                if pd.notna(strat.get('Notes')) and strat['Notes']:
+                                    st.info(f"📝 **Notes:** {strat['Notes']}")
+                            with c_proto:
+                                st.markdown("### ⚡ PROTOCOLS")
+                                try: protos = json.loads(strat['Protocols'])
+                                except: protos = []
+                                if protos:
+                                    for p in protos: st.markdown(f"""<div class="proto-box"><div class="proto-if">IF: {p['trigger']}</div><div class="proto-then">👉 {p['reaction']}</div></div>""", unsafe_allow_html=True)
+                                else: st.caption("No protocols defined.")
+                                
+                                with st.popover(f"Edit Protocols"):
+                                    with st.form(f"pf_{strat['Strat_ID']}"):
+                                        trig = st.text_input("IF (Trigger)"); react = st.text_input("THEN (Reaction)")
+                                        if st.form_submit_button("Add"):
+                                            protos.append({'trigger': trig, 'reaction': react})
+                                            df_pb_strats.loc[df_pb_strats['Strat_ID'] == strat['Strat_ID'], 'Protocols'] = json.dumps(protos)
+                                            save_pb_strats(df_pb_strats)
+                                            st.rerun()
+                                    if st.button("Clear Protocols", key=f"clr_{strat['Strat_ID']}"):
+                                        df_pb_strats.loc[df_pb_strats['Strat_ID'] == strat['Strat_ID'], 'Protocols'] = '[]'
+                                        save_pb_strats(df_pb_strats)
+                                        st.rerun()
+                            st.divider()
 
     # --------------------------------------------------------------------------
     # TAB 3: MAP THEORY
     # --------------------------------------------------------------------------
     with tab_theory:
         st.subheader("CONCEPTUAL FRAMEWORK")
-        theory_map = st.selectbox("Select Map:", sorted(df['Map'].unique()) if not df.empty else ["Ascent"], key="theory_map_sel")
+        
+        # 1. Visual Map Selector
+        if 'theory_map' not in st.session_state: 
+            st.session_state.theory_map = sorted(df['Map'].unique())[0] if not df.empty else "Ascent"
+            
+        with st.expander("🗺️ SELECT MAP", expanded=True):
+            render_visual_selection(sorted(df['Map'].unique()), 'map', 'theory_sel', multi=False, key_state='theory_map')
+            
+        theory_map = st.session_state.theory_map
+        
         if 'Image' not in df_theory.columns: df_theory['Image'] = None
 
         def get_theory_data(m, s):
@@ -2366,57 +2919,188 @@ elif page == "📘 STRATEGY BOARD":
         
         for sec_name, sec_tab in sections:
             with sec_tab:
-                c_txt, c_upl = st.columns([2, 1])
+                # Unique key for edit mode state
+                edit_key = f"edit_mode_{theory_map}_{sec_name}"
+                if edit_key not in st.session_state: st.session_state[edit_key] = False
+                
                 curr_txt, curr_img = get_theory_data(theory_map, sec_name)
-                with c_txt: new_txt = st.text_area(f"{sec_name} Notes", value=curr_txt, height=400)
-                with c_upl:
-                    if curr_img:
-                        p = os.path.join(STRAT_IMG_DIR, curr_img)
-                        if os.path.exists(p): st.image(p, caption="Current Reference", use_container_width=True)
-                    new_img = st.file_uploader(f"Upload {sec_name} Image", type=['png', 'jpg'], key=f"up_{theory_map}_{sec_name}")
-                if st.button(f"Save {sec_name}", key=f"sv_{theory_map}_{sec_name}"):
-                    save_theory_data_gsheet(theory_map, sec_name, new_txt, new_img, curr_img)
-                    st.success("Saved"); st.rerun()
+                
+                # Header & Edit Toggle
+                c_head, c_btn = st.columns([4, 1])
+                with c_head: st.markdown(f"### {theory_map} - {sec_name} Theory")
+                with c_btn:
+                    if st.session_state[edit_key]:
+                        if st.button("❌ Cancel", key=f"cn_{theory_map}_{sec_name}"):
+                            st.session_state[edit_key] = False
+                            st.rerun()
+                    else:
+                        if st.button("✏️ Edit", key=f"ed_{theory_map}_{sec_name}"):
+                            st.session_state[edit_key] = True
+                            st.rerun()
+                
+                st.divider()
+                
+                if st.session_state[edit_key]:
+                    # EDIT MODE
+                    # Improved Workflow: Image in Expander for better visibility
+                    with st.expander("🖼️ Reference Image (View Large)", expanded=True):
+                        if curr_img:
+                            p = os.path.join(STRAT_IMG_DIR, curr_img)
+                            if os.path.exists(p): st.image(p, use_container_width=True)
+                        else:
+                            st.info("No image currently uploaded.")
+
+                    with st.form(f"form_{theory_map}_{sec_name}"):
+                        new_txt = st.text_area("Content (Markdown supported)", value=curr_txt if curr_txt else "", height=500)
+                        new_img = st.file_uploader("Upload New Image (Overwrites current)", type=['png', 'jpg'])
+                        
+                        if st.form_submit_button("💾 Save Changes", type="primary"):
+                            save_theory_data_gsheet(theory_map, sec_name, new_txt, new_img, curr_img)
+                            st.session_state[edit_key] = False
+                            st.success("Saved!")
+                            st.rerun()
+                else:
+                    # VIEW MODE
+                    if not curr_txt and not curr_img:
+                        st.info("No theory content added yet. Click 'Edit' to start writing.")
+                    else:
+                        # Toolbar: Layout Toggle & Export
+                        tb1, tb2 = st.columns([2, 1])
+                        with tb1:
+                            layout_mode = st.radio("View Layout:", ["Side-by-Side", "Stacked (Large Image)"], horizontal=True, key=f"lo_{theory_map}_{sec_name}")
+                        with tb2:
+                            # Export Markdown
+                            md_out = f"# {theory_map} - {sec_name} Theory\n\n"
+                            if curr_txt: md_out += curr_txt + "\n\n"
+                            if curr_img: md_out += f"![Reference Image]({curr_img})"
+                            
+                            st.download_button(
+                                label="⬇️ Export Markdown",
+                                data=md_out,
+                                file_name=f"{theory_map}_{sec_name}_Theory.md",
+                                mime="text/markdown",
+                                key=f"exp_{theory_map}_{sec_name}"
+                            )
+
+                        st.divider()
+
+                        if layout_mode == "Stacked (Large Image)":
+                            if curr_img:
+                                p = os.path.join(STRAT_IMG_DIR, curr_img)
+                                if os.path.exists(p): st.image(p, use_container_width=True)
+                            if curr_txt: st.markdown(curr_txt)
+                        else:
+                            c_view_txt, c_view_img = st.columns([1, 1])
+                            with c_view_txt:
+                                if curr_txt: st.markdown(curr_txt)
+                                else: st.caption("_No text content._")
+                            with c_view_img:
+                                if curr_img:
+                                    p = os.path.join(STRAT_IMG_DIR, curr_img)
+                                    if os.path.exists(p): 
+                                        st.image(p, use_container_width=True)
+                                        with open(p, "rb") as f:
+                                            st.download_button(label="Download Image", data=f, file_name=curr_img, mime="image/png", key=f"dl_{theory_map}_{sec_name}")
+                                else:
+                                    st.caption("_No image attached._")
 
     # --------------------------------------------------------------------------
     # TAB 4: EXTERNAL LINKS
     # --------------------------------------------------------------------------
     with tab_links:
+        st.subheader("🔗 Playbooks")
         # Use Legacy Playbooks for external links if that's the intent or df_legacy_pb
         # Based on previous code, pb_df seemed to load PLAYBOOKS_FILE which is now df_legacy_pb
         pb_df = df_legacy_pb 
         
-        with st.expander("➕ New External Link"):
-            with st.form("pb_link"):
-                c1, c2 = st.columns(2)
-                pm = c1.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"], key="lm")
-                pn = c1.text_input("Name", key="ln"); pl = c2.text_input("Link", key="ll")
-                ags = sorted([os.path.basename(x).replace(".png","").capitalize() for x in glob.glob(os.path.join(ASSET_DIR, "agents", "*.png"))])
-                cols = st.columns(5)
-                mas = [cols[i].selectbox(f"P{i}", [""]+ags, key=f"la{i}") for i in range(5)]
-                if st.form_submit_button("Save"): 
-                    nr = {'Map': pm, 'Name': pn, 'Link': pl}
-                    for i in range(5): nr[f'Agent_{i+1}'] = mas[i]
-                    
-                    updated = pd.concat([pb_df, pd.DataFrame([nr])], ignore_index=True)
-                    save_legacy_playbooks(updated)
-                    st.rerun()
-
-        if not pb_df.empty:
-            f_pb = st.selectbox("Links Map:", ["All"]+sorted(pb_df['Map'].unique()), key="fl_map")
-            v_pb = pb_df if f_pb == "All" else pb_df[pb_df['Map'] == f_pb]
-            for idx, row in v_pb.iterrows():
-                map_img = get_map_img(row['Map'], 'list')
-                b64_map = img_to_b64(map_img)
-                ag_html = ""
-                for i in range(1, 6):
-                    a = row.get(f'Agent_{i}')
-                    if a and pd.notna(a):
-                        ab64 = img_to_b64(get_agent_img(a))
-                        if ab64: ag_html += f"<img src='data:image/png;base64,{ab64}' style='width:35px; height:35px; border-radius:50%; border:2px solid #111; margin-right:-10px; z-index:{i}'>"
+        # --- 1. ADD NEW LINK ---
+        with st.expander("➕ Add New External Link"):
+            with st.form("pb_link_form"):
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    pm = st.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"], key="lm")
+                    pn = st.text_input("Strategy Name", placeholder="e.g. Pistol Round Strat", key="ln")
+                with c2:
+                    pl = st.text_input("External Link (VOD/Doc)", placeholder="https://...", key="ll")
+                    st.caption("Select Agents (Optional Composition):")
+                    ags = sorted([os.path.basename(x).replace(".png","").capitalize() for x in glob.glob(os.path.join(ASSET_DIR, "agents", "*.png"))])
+                    cols = st.columns(5)
+                    mas = [cols[i].selectbox(f"Agent {i+1}", [""]+ags, key=f"la{i}", label_visibility="collapsed") for i in range(5)]
                 
-                st.markdown(f"""<div class='pb-card'><div style="display:flex;align-items:center;gap:20px;"><div style="width:160px;height:90px;border-radius:5px;background-image:url('data:image/png;base64,{b64_map}');background-size:contain;background-position:center;background-repeat:no-repeat;border:1px solid #444;"></div><div><div style="color:#00BFFF;font-weight:bold;font-size:1.1em;text-transform:uppercase;">{row['Name']}</div><div style="color:#666;font-size:0.8em;">{row['Map']}</div></div><div style="margin-left:auto;padding-right:10px;">{ag_html}</div></div></div>""", unsafe_allow_html=True)
-                st.markdown(f'<a href="{row["Link"]}" target="_blank" style="text-decoration: none;"><button style="background: linear-gradient(90deg, #00BFFF, #FF1493); color: white; padding: 8px 15px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">OPEN LINK >></button></a>', unsafe_allow_html=True)
+                if st.form_submit_button("💾 Save Link", type="primary"): 
+                    if pn and pl:
+                        nr = {'Map': pm, 'Name': pn, 'Link': pl}
+                        for i in range(5): nr[f'Agent_{i+1}'] = mas[i]
+                        
+                        updated = pd.concat([pb_df, pd.DataFrame([nr])], ignore_index=True)
+                        save_legacy_playbooks(updated)
+                        st.success("Link saved!")
+                        st.rerun()
+                    else:
+                        st.error("Name and Link are required.")
+
+        st.divider()
+
+        # --- 2. FILTER & DISPLAY ---
+        if not pb_df.empty:
+            # Visual Map Selector
+            if 'link_map_sel' not in st.session_state: 
+                st.session_state.link_map_sel = sorted(pb_df['Map'].unique())[0] if not pb_df.empty else "Ascent"
+            
+            # Toggle for "Show All"
+            c_filter, c_toggle = st.columns([3, 1])
+            with c_toggle:
+                show_all = st.checkbox("Show All Maps", value=False)
+            
+            selected_map = st.session_state.link_map_sel
+            
+            if not show_all:
+                with c_filter:
+                    with st.expander("🗺️ SELECT MAP", expanded=True):
+                        render_visual_selection(sorted(pb_df['Map'].unique()), 'map', 'link_sel', multi=False, key_state='link_map_sel')
+                v_pb = pb_df[pb_df['Map'] == selected_map]
+            else:
+                v_pb = pb_df
+
+            if v_pb.empty:
+                st.info(f"No links found for {selected_map}.")
+            else:
+                # --- 3. DISPLAY CARDS ---
+                for idx, row in v_pb.iterrows():
+                    with st.container():
+                        # Layout: Image | Content | Action
+                        c_img, c_content, c_action = st.columns([1, 3, 1])
+                        
+                        # Map Image
+                        with c_img:
+                            map_img = get_map_img(row['Map'], 'list')
+                            if map_img: st.image(map_img, use_container_width=True)
+                            else: st.markdown(f"**{row['Map']}**")
+                        
+                        # Content
+                        with c_content:
+                            st.markdown(f"### {row['Name']}")
+                            st.caption(f"Map: {row['Map']}")
+                            
+                            # Agents
+                            ag_cols = st.columns(10)
+                            for i in range(1, 6):
+                                a = row.get(f'Agent_{i}')
+                                if a and pd.notna(a) and str(a).strip() != "":
+                                    b64 = get_styled_agent_img_b64(a)
+                                    if b64: ag_cols[i-1].image(f"data:image/png;base64,{b64}", width=40)
+                        
+                        # Action
+                        with c_action:
+                            st.link_button("🔗 OPEN", row['Link'], use_container_width=True)
+                            if st.button("🗑️", key=f"del_link_{idx}"):
+                                pb_df = pb_df.drop(idx)
+                                save_legacy_playbooks(pb_df)
+                                st.rerun()
+                        
+                        st.markdown("---")
+        else:
+            st.info("No external links added yet.")
 
 # ==============================================================================
 # 5. RESOURCES
@@ -2457,10 +3141,28 @@ elif page == "📅 CALENDAR":
     if 'cy' not in st.session_state: st.session_state['cy'] = datetime.now().year
     if 'cm' not in st.session_state: st.session_state['cm'] = datetime.now().month
     
-    c1, c2 = st.columns([2, 1])
+    # NEW: Get User
+    current_user = st.session_state.get('username', '')
+    
+    c1, c2 = st.columns([3, 1]) # Bigger Calendar (3:1 ratio)
     # df_cal and df_simple_todos loaded globally
     
     with c1:
+        # --- FILTER ---
+        p_list = ["Luggi","Benni","Andrei","Luca","Sofi","Remus"]
+        filter_opts = ["All", "My Events"] + p_list
+        def_idx = 1 if st.session_state.get('role') == 'player' else 0
+        
+        sel_filter = st.selectbox("Filter Events:", filter_opts, index=def_idx)
+        
+        df_cal_view = df_cal.copy()
+        if sel_filter != "All":
+            target_user = current_user if sel_filter == "My Events" else sel_filter
+            if target_user:
+                df_cal_view = df_cal_view[df_cal_view['Players'].apply(
+                    lambda x: pd.isna(x) or str(x).strip() == "" or target_user in str(x)
+                )]
+
         cp, cc, cn = st.columns([1,2,1])
         if cp.button("<"): st.session_state['cm']-=1
         if cn.button(">"): st.session_state['cm']+=1
@@ -2480,35 +3182,87 @@ elif page == "📅 CALENDAR":
                 with cols[i]:
                     if d!=0:
                         d_s = f"{d:02d}.{curr.month:02d}.{curr.year}"
-                        evs = df_cal[df_cal['Date']==d_s]
-                        bg = "#1a1a40; border:1px solid #00BFFF" if date(curr.year, curr.month, d)==date.today() else "#222"
-                        h = f"<div class='cal-day-box' style='background:{bg}'><b>{d}</b>"
+                        evs = df_cal_view[df_cal_view['Date']==d_s]
+                        
+                        is_today = date(curr.year, curr.month, d) == date.today()
+                        extra_cls = " cal-today" if is_today else ""
+                        
+                        h = f"<div class='cal-day-box{extra_cls}'><div class='cal-date'>{d}</div>"
                         for _, e in evs.iterrows():
                             c = "#FF1493" if e.get('Type')=="Match" else "#00BFFF"
-                            h+=f"<div class='cal-event-pill' style='background:{c}40; border-left:2px solid {c}'>{e['Time']} {e['Event']}</div>"
+                            p_info = f"&#10;👥 {e['Players']}" if pd.notna(e.get('Players')) and e['Players'] else ""
+                            h+=f"<div class='cal-event-pill' style='background:{c}20; border-left-color:{c}' title='{e['Time']} {e['Event']}{p_info}'>{e['Time']} {e['Event']}</div>"
                         st.markdown(h+"</div>", unsafe_allow_html=True)
         
         with st.expander("Add Event"):
             with st.form("ca"):
-                cd=st.date_input("D"); ct=st.time_input("T"); ce=st.text_input("E"); cm=st.text_input("M"); cty=st.selectbox("T",["Match","Scrim","Other"])
+                c_d, c_t = st.columns(2)
+                cd=c_d.date_input("Date"); ct=c_t.time_input("Time")
+                ce=st.text_input("Event Name"); 
+                c_m, c_ty = st.columns(2)
+                cm=c_m.text_input("Map (Optional)"); cty=c_ty.selectbox("Type",["Match","Scrim","Other"])
+                
+                # Player Selector
+                cp = st.multiselect("Assign Players", ["Luggi","Benni","Andrei","Luca","Sofi","Remus"], default=[])
+                
                 if st.form_submit_button("Add"):
-                    updated = pd.concat([df_cal, pd.DataFrame([{'Date':cd.strftime("%d.%m.%Y"),'Time':ct.strftime("%H:%M"),'Event':ce,'Map':cm,'Type':cty}])], ignore_index=True)
+                    p_str = ", ".join(cp)
+                    updated = pd.concat([df_cal, pd.DataFrame([{'Date':cd.strftime("%d.%m.%Y"),'Time':ct.strftime("%H:%M"),'Event':ce,'Map':cm,'Type':cty,'Players':p_str}])], ignore_index=True)
                     save_calendar(updated)
                     st.rerun()
 
-    with c2:
-        st.subheader("TODO")
-        with st.form("td"):
-            t = st.text_input("Task")
-            if st.form_submit_button("Add"):
-                updated = pd.concat([df_simple_todos, pd.DataFrame([{'Task':t, 'Done':False}])], ignore_index=True)
-                save_simple_todos(updated)
+        with st.expander("Manage Events (Edit Dates / Delete)"):
+            st.caption("💡 You can edit dates here to move events.")
+            edited_cal = st.data_editor(df_cal, num_rows="dynamic", use_container_width=True)
+            if st.button("Save Schedule Changes"):
+                save_calendar(edited_cal)
+                st.success("Schedule updated!")
                 st.rerun()
+
+    with c2:
+        st.markdown("### ✅ QUICK TASKS")
+        
+        # Progress Bar
         if not df_simple_todos.empty:
-            ed = st.data_editor(df_simple_todos, num_rows="dynamic")
-            if st.button("Save Todo"): 
-                save_simple_todos(ed)
-                st.success("Saved")
+            done_count = len(df_simple_todos[df_simple_todos['Done']==True])
+            total_count = len(df_simple_todos)
+            prog = done_count / total_count if total_count > 0 else 0
+            st.progress(prog, text=f"{done_count}/{total_count} Completed")
+        
+        # Quick Add
+        with st.form("quick_todo", clear_on_submit=True):
+            c_in, c_btn = st.columns([3, 1])
+            new_task = c_in.text_input("New Task", label_visibility="collapsed", placeholder="Add task...")
+            if c_btn.form_submit_button("➕"):
+                if new_task:
+                    updated = pd.concat([df_simple_todos, pd.DataFrame([{'Task':new_task, 'Done':False}])], ignore_index=True)
+                    save_simple_todos(updated)
+                    st.rerun()
+
+        # Visual List
+        if not df_simple_todos.empty:
+            st.markdown("<div style='height: 10px'></div>", unsafe_allow_html=True)
+            # Sort: Pending first
+            for i, row in df_simple_todos.sort_values('Done').iterrows():
+                done = row['Done']
+                label = f"~~{row['Task']}~~" if done else row['Task']
+                
+                # Custom Checkbox Row
+                if st.checkbox(label, value=done, key=f"todo_{i}"):
+                    if not done:
+                        df_simple_todos.at[i, 'Done'] = True
+                        save_simple_todos(df_simple_todos)
+                        st.rerun()
+                else:
+                    if done:
+                        df_simple_todos.at[i, 'Done'] = False
+                        save_simple_todos(df_simple_todos)
+                        st.rerun()
+            
+            if st.button("🗑️ Clear Completed", use_container_width=True):
+                df_simple_todos = df_simple_todos[df_simple_todos['Done'] == False]
+                save_simple_todos(df_simple_todos)
+                st.rerun()
 
 # ==============================================================================
 # 7. PLAYERS (KOMPLETT NEU MIT DEEP DIVE)
@@ -2543,12 +3297,8 @@ elif page == "📊 PLAYERS":
         except:
             return [''] * len(s)
 
-    # TABS ERSTELLEN
     tab_overview, tab_deep = st.tabs(["📊 TEAM OVERVIEW", "🧬 DEEP DIVE ANALYZER"])
     
-    # --------------------------------------------------------------------------
-    # TAB 1: TEAM OVERVIEW (Der alte Code)
-    # --------------------------------------------------------------------------
     with tab_overview:
         if df_players.empty:
             st.info("No player stats yet. Import JSON matches to see data.")
@@ -2590,6 +3340,10 @@ elif page == "📊 PLAYERS":
                 st.warning("No data matches your filters.")
             else:
                 # Aggregate Data
+                # Ensure advanced stats exist (fallback for old data)
+                for c in ['ADR', 'FK', 'FD']:
+                    if c not in df_filtered.columns: df_filtered[c] = 0
+
                 p_agg = df_filtered.groupby('Player').agg({
                     'MatchID': 'nunique', 
                     'Kills': 'sum', 
@@ -2597,7 +3351,8 @@ elif page == "📊 PLAYERS":
                     'Assists': 'sum', 
                     'Score': 'sum', 
                     'Rounds': 'sum',
-                    'HS': 'mean' 
+                    'HS': 'mean',
+                    'ADR': 'mean', 'FK': 'sum', 'FD': 'sum'
                 }).reset_index()
                 
                 # Calculate Metrics
@@ -2607,8 +3362,12 @@ elif page == "📊 PLAYERS":
                 p_agg['KPR'] = p_agg['Kills'] / p_agg['Rounds'].replace(0, 1)
                 p_agg['APR'] = p_agg['Assists'] / p_agg['Rounds'].replace(0, 1)
                 p_agg['DPR'] = p_agg['Deaths'] / p_agg['Rounds'].replace(0, 1)
+                # Rating Formula: KPR + (ADR/450) + (FK-FD)/Rounds
+                p_agg['Rating'] = p_agg['KPR'] + (p_agg['ADR'] / 450) + ((p_agg['FK'] - p_agg['FD']) / p_agg['Rounds'].replace(0, 1))
                 
                 p_display = p_agg.rename(columns={'MatchID': 'Matches'})
+                # Sort by Rating
+                p_display = p_display.sort_values('Rating', ascending=False)
                 
                 # --- 3. TABLE VIEW ---
                 st.divider()
@@ -2631,12 +3390,14 @@ elif page == "📊 PLAYERS":
                         else: return c_bad
 
                 # Apply Pandas Styling
-                styler = p_display[['Player', 'Matches', 'KD', 'ACS', 'HS', 'KPR', 'APR', 'DPR']].style\
-                    .format({"KD": "{:.2f}", "ACS": "{:.0f}", "HS": "{:.1f}%", "KPR": "{:.2f}", "APR": "{:.2f}", "DPR": "{:.2f}"})\
-                    .map(lambda v: style_good_bad(v, 1.2, 0.9), subset=['KD'])\
+                styler = p_display[['Player', 'Matches', 'Rating', 'KD', 'ACS', 'HS', 'KPR', 'APR', 'DPR']].style\
+                    .format({"Rating": "{:.2f}", "KD": "{:.2f}", "ACS": "{:.0f}", "HS": "{:.1f}%", "KPR": "{:.2f}", "APR": "{:.2f}", "DPR": "{:.2f}"})\
+                    .map(lambda v: style_good_bad(v, 1.2, 0.85), subset=['Rating'])\
+                    .map(lambda v: style_good_bad(v, 1.1, 0.9), subset=['KD'])\
                     .map(lambda v: style_good_bad(v, 230, 180), subset=['ACS'])\
                     .map(lambda v: style_good_bad(v, 25, 15), subset=['HS'])\
                     .map(lambda v: style_good_bad(v, 0.8, 0.6), subset=['KPR'])\
+                    .map(lambda v: style_good_bad(v, 0.35, 0.15), subset=['APR'])\
                     .map(lambda v: style_good_bad(v, 0.65, 0.80, inverse=True), subset=['DPR'])
 
                 st.dataframe(
@@ -2644,6 +3405,7 @@ elif page == "📊 PLAYERS":
                     column_config={
                         "Player": st.column_config.TextColumn("Player", width="medium"),
                         "Matches": st.column_config.NumberColumn("Matches", format="%d"),
+                        "Rating": st.column_config.NumberColumn("Rating", format="%.2f"),
                         "KD": st.column_config.NumberColumn("K/D"),
                     },
                     use_container_width=True,
@@ -2711,9 +3473,6 @@ elif page == "📊 PLAYERS":
                                           margin=dict(t=20, b=20, l=20, r=20), legend=dict(orientation="h", y=1.02))
                         st.plotly_chart(fig, use_container_width=True)
 
-# --------------------------------------------------------------------------
-    # TAB 2: DEEP DIVE (MIT DIAGRAMMEN)
-    # --------------------------------------------------------------------------
     with tab_deep:
         # --- ABILITY MAPPING DATABASE ---
         AGENT_ABILITIES = {
@@ -2743,8 +3502,16 @@ elif page == "📊 PLAYERS":
             "Vyse": {"C": "Razorvine", "Q": "Shear", "E": "Arc Rose", "X": "Steel Garden"},
             "Yoru": {"C": "Fakeout", "Q": "Blindside", "E": "Gatecrash", "X": "Dimensional Drift"},
         }
+        
+        # --- ROLE MAPPING ---
+        AGENT_ROLES = {
+            "Duelist": ["Jett", "Phoenix", "Reyna", "Raze", "Yoru", "Neon", "Iso"],
+            "Initiator": ["Sova", "Breach", "Skye", "KAY/O", "Fade", "Gekko"],
+            "Controller": ["Brimstone", "Viper", "Omen", "Astra", "Harbor", "Clove"],
+            "Sentinel": ["Sage", "Cypher", "Killjoy", "Chamber", "Deadlock", "Vyse"]
+        }
 
-        st.markdown("### 🧬 INDIVIDUAL PLAYER DEEP DIVE")
+        st.markdown("### 🧬 INDIVIDUAL PLAYER DEEP DIVE (Ranked Data)")
         deep_player = st.selectbox("Select Player", ["Andrei", "Benni", "Luca", "Luggi", "Remus", "Sofi"])
         
         # Pfad laden
@@ -2752,11 +3519,11 @@ elif page == "📊 PLAYERS":
         df_deep = pd.DataFrame()
         
         if os.path.exists(file_path):
-            st.success(f"📂 Analysing local data for **{deep_player}**")
             df_deep = parse_tracker_json(file_path)
         else:
-            up = st.file_uploader("Upload JSON", type=['json'])
-            if up: df_deep = parse_tracker_json(up)
+            st.info(f"No local data file found for {deep_player}. Please upload a Tracker.gg JSON export.")
+            up = st.file_uploader("Upload Player JSON Export", type=['json'], key=f"deep_dive_upload_{deep_player}")
+            if up: df_deep = parse_tracker_json(up); st.rerun()
 
         # --- HIER BEGINNT DIE ANALYSE ---
         if not df_deep.empty:
@@ -2771,11 +3538,20 @@ elif page == "📊 PLAYERS":
                 st.stop()
 
             # 1. TOP STATS ROW
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("K/D RATIO", f"{df_deep['KD'].mean():.2f}")
+            k1, k2, k3, k4, k5 = st.columns(5)
+            # Fix K/D: Use Total Kills / Total Deaths instead of Mean of Ratios
+            dd_k = df_deep['Kills'].sum()
+            dd_d = df_deep['Deaths'].sum()
+            dd_kd = dd_k / dd_d if dd_d > 0 else dd_k
+            k1.metric("K/D RATIO", f"{dd_kd:.2f}")
             k2.metric("HEADSHOT %", f"{df_deep['HS%'].mean():.1f}%")
             k3.metric("ADR", f"{df_deep['ADR'].mean():.0f}")
-            k4.metric("UTIL PER MATCH", f"{df_deep['Total_Util'].mean():.1f}")
+            upr = df_deep['Total_Util'].sum() / df_deep['Rounds'].sum() if df_deep['Rounds'].sum() > 0 else 0
+            k4.metric("UTIL / ROUND", f"{upr:.2f}")
+            # VLR Rating Approximation (Simple)
+            # NEW FORMULA: KPR + (ADR/450) + (FK-FD)/Rounds -> Avg ~ 1.0, High ~ 1.5
+            vlr_approx = (df_deep['Kills'].sum()/df_deep['Rounds'].sum()) + (df_deep['ADR'].mean()/450) + ((df_deep['FK'].sum() - df_deep['FD'].sum())/df_deep['Rounds'].sum())
+            k5.metric("VLR RATING", f"{vlr_approx:.2f}")
             
             st.divider()
 
@@ -2784,15 +3560,31 @@ elif page == "📊 PLAYERS":
             
             # Daten aggregieren
             ag_stats = df_deep.groupby('Agent').agg({
-                'MatchesPlayed': 'sum', 
-                'Kills': 'sum', 'Deaths': 'sum', 
+                'MatchesPlayed': 'sum',
+                'Kills': 'sum', 'Deaths': 'sum',
                 'Wins': 'sum',
+                'Rounds': 'sum',
                 'HS%': 'mean',
-                'Cast_Grenade':'mean', 'Cast_Abil1':'mean', 'Cast_Abil2':'mean', 'Cast_Ult':'mean'
+                'Cast_Grenade':'sum', 'Cast_Abil1':'sum', 'Cast_Abil2':'sum', 'Cast_Ult':'sum',
+                'FK': 'sum', 'FD': 'sum', 'ADR': 'mean'
             }).reset_index()
             ag_stats['Win%'] = ag_stats['Wins'] / ag_stats['MatchesPlayed'] * 100
             ag_stats['KD'] = ag_stats['Kills'] / ag_stats['Deaths'].replace(0,1)
             
+            # Util pro Runde berechnen
+            safe_rounds = ag_stats['Rounds'].replace(0, 1)
+            ag_stats['C_per_round'] = ag_stats['Cast_Grenade'] / safe_rounds
+            ag_stats['Q_per_round'] = ag_stats['Cast_Abil1'] / safe_rounds
+            ag_stats['E_per_round'] = ag_stats['Cast_Abil2'] / safe_rounds
+            ag_stats['X_per_round'] = ag_stats['Cast_Ult'] / safe_rounds
+            
+            # VLR Rating Calculation per Agent
+            # Formula: KPR + (APR/3) + (ADR/300) + (FK-FD)/Rounds + 0.2 (Offset)
+            ag_stats['KPR'] = ag_stats['Kills'] / safe_rounds
+            ag_stats['APR'] = (ag_stats['Kills'] * 0.3) / safe_rounds # Approximation if Assists not in agg, but we need Assists
+            # Fix: Assists were missing in agg above, let's add them if possible or use Kills proxy. 
+            # Better: Add 'Assists' to agg.
+
             # Sortieren nach meisten Matches
             ag_stats = ag_stats.sort_values('MatchesPlayed', ascending=False)
             
@@ -2800,35 +3592,34 @@ elif page == "📊 PLAYERS":
             table_data = []
             for _, row in ag_stats.iterrows():
                 agent_name = row['Agent']
-                # Bild laden und zu Base64 konvertieren für die Tabelle
                 img_path = get_agent_img(agent_name)
                 img_b64 = f"data:image/png;base64,{img_to_b64(img_path)}" if img_path else ""
                 
                 table_data.append({
-                    "Icon": img_b64,
-                    "Agent": agent_name,
+                    "Icon": img_b64, "Agent": agent_name,
                     "Matches": int(row['MatchesPlayed']),
+                    # NEW FORMULA: KPR + (ADR/450) + (FK-FD)/Rounds
+                    "Rating": (row['Kills']/row['Rounds'] if row['Rounds']>0 else 0) + (row['ADR']/450) + ((row['FK']-row['FD'])/row['Rounds'] if row['Rounds']>0 else 0),
                     "Win%": row['Win%'],
-                    "K/D": row['KD'],
-                    "HS%": row['HS%'],
-                    "C": row['Cast_Grenade'],
-                    "Q": row['Cast_Abil1'],
-                    "E": row['Cast_Abil2'],
-                    "X": row['Cast_Ult'],
+                    "K/D": row['KD'], "HS%": row['HS%'],
+                    "C": row['C_per_round'], "Q": row['Q_per_round'],
+                    "E": row['E_per_round'], "X": row['X_per_round'],
                 })
             
             df_table = pd.DataFrame(table_data)
             
-            # Apply Styling
+                    # HIER WERTE ÄNDERN: (Wert, Gut_Grenze, Schlecht_Grenze)
             styler = df_table.style\
                 .format({
-                    "Win%": "{:.0f}%", "K/D": "{:.2f}", "HS%": "{:.1f}%",
+                    "Win%": "{:.0f}%", "K/D": "{:.2f}", "HS%": "{:.1f}%", "Rating": "{:.2f}",
                     "C": "{:.1f}", "Q": "{:.1f}", "E": "{:.1f}", "X": "{:.1f}"
                 })\
-                .map(lambda v: style_good_bad(v, 60, 45), subset=['Win%'])\
-                .map(lambda v: style_good_bad(v, 1.2, 0.9), subset=['K/D'])\
+                .map(lambda v: style_good_bad(v, 1.1, 0.9), subset=['Rating'])\
+                .map(lambda v: style_good_bad(v, 55, 45), subset=['Win%'])\
+                .map(lambda v: style_good_bad(v, 1.1, 0.9), subset=['K/D'])\
                 .map(lambda v: style_good_bad(v, 25, 15), subset=['HS%'])\
                 .apply(style_purple_gradient, subset=['C', 'Q', 'E', 'X'])
+
 
             st.dataframe(
                 styler,
@@ -2836,18 +3627,34 @@ elif page == "📊 PLAYERS":
                     "Icon": st.column_config.ImageColumn("Icon", width="small"),
                     "Agent": st.column_config.TextColumn("Agent", width="small"),
                     "Matches": st.column_config.NumberColumn("#", format="%d", width="small"),
+                    "Rating": st.column_config.NumberColumn("Rating", format="%.2f"),
                     "Win%": st.column_config.TextColumn("Win%"),
                     "K/D": st.column_config.TextColumn("K/D"),
                     "HS%": st.column_config.TextColumn("HS%"),
-                    "C": st.column_config.NumberColumn("C", help="Avg Casts per Match"),
-                    "Q": st.column_config.NumberColumn("Q", help="Avg Casts per Match"),
-                    "E": st.column_config.NumberColumn("E", help="Avg Casts per Match"),
-                    "X": st.column_config.NumberColumn("X", help="Avg Casts per Match"),
+                    "C": st.column_config.NumberColumn("C", help="Avg Casts per Round"),
+                    "Q": st.column_config.NumberColumn("Q", help="Avg Casts per Round"),
+                    "E": st.column_config.NumberColumn("E", help="Avg Casts per Round"),
+                    "X": st.column_config.NumberColumn("X", help="Avg Casts per Round"),
                 },
                 use_container_width=True,
                 hide_index=True,
                 height=400
             )
+            
+            # EXPORT BUTTON (HTML Report)
+            export_df = df_table.drop(columns=['Icon'])
+            html_report = f"""
+            <html>
+            <head><title>{deep_player} Report</title>
+            <style>body{{font-family:sans-serif;}} table{{border-collapse:collapse;width:100%;}} th,td{{border:1px solid #444;padding:8px;}} th{{background:#eee;}}</style>
+            </head>
+            <body>
+            <h2>NEXUS Report: {deep_player}</h2>
+            <p><strong>K/D:</strong> {df_deep['KD'].mean():.2f} | <strong>HS%:</strong> {df_deep['HS%'].mean():.1f}% | <strong>Rating:</strong> {vlr_approx:.2f}</p>
+            {export_df.to_html(index=False)}
+            </body></html>
+            """
+            st.download_button("📄 Export Report (HTML)", html_report, file_name=f"{deep_player}_report.html", mime="text/html", help="Download as HTML, then Print to PDF (Ctrl+P)")
 
             with st.expander("Ability Key"):
                 for agent in df_table['Agent']:
@@ -2888,6 +3695,147 @@ elif page == "📊 PLAYERS":
                               })
                 fig2.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(255,255,255,0.05)', font=dict(color='white'))
                 st.plotly_chart(fig2, use_container_width=True)
+            
+            st.divider()
+            
+            # 4. ROLE PERFORMANCE SPIDER CHART
+            st.subheader("🕸️ ROLE PERFORMANCE ANALYZER")
+            
+            # Assign Roles to df_deep
+            def get_role(agent_name):
+                for role, agents in AGENT_ROLES.items():
+                    if agent_name in agents: return role
+                return "Flex"
+            
+            df_deep['Role'] = df_deep['Agent'].apply(get_role)
+            
+            # Group by Role
+            role_stats = df_deep.groupby('Role').agg({
+                'Kills': 'sum', 'Deaths': 'sum', 'Assists': 'sum',
+                'FK': 'sum', 'FD': 'sum', 'Clutches': 'sum',
+                'Rounds': 'sum', 'ADR': 'mean', 'KAST': 'mean'
+            }).reset_index()
+            
+            available_roles = role_stats['Role'].unique()
+            
+            # Layout Columns
+            c_chart, c_stats = st.columns([2, 1])
+            
+            if len(available_roles) > 0:
+                with c_stats:
+                    sel_role = st.selectbox("Select Role to Analyze:", available_roles)
+                    comp_player = st.selectbox("Compare with:", ["None"] + [p for p in ["Andrei", "Benni", "Luca", "Luggi", "Remus", "Sofi"] if p != deep_player])
+                
+                r_data = role_stats[role_stats['Role'] == sel_role].iloc[0]
+                rounds = r_data['Rounds'] if r_data['Rounds'] > 0 else 1
+                
+                # Metrics Definitions based on Role
+                metrics = {}
+                
+                if sel_role == "Duelist":
+                    metrics = {
+                        "FK/FD Ratio": r_data['FK'] / r_data['FD'] if r_data['FD'] > 0 else r_data['FK'],
+                        "FB per Round": r_data['FK'] / rounds,
+                        "KPR": r_data['Kills'] / rounds,
+                        "ADR": r_data['ADR'],
+                        "Survival%": (rounds - r_data['Deaths']) / rounds
+                    }
+                    max_vals = {"FK/FD Ratio": 2.0, "FB per Round": 0.25, "KPR": 1.2, "ADR": 200, "Survival%": 0.6}
+                    
+                elif sel_role == "Initiator":
+                    metrics = {
+                        "APR": r_data['Assists'] / rounds,
+                        "KAS%": r_data['KAST'], # Fallback KAS calc
+                        "Survival%": (rounds - r_data['Deaths']) / rounds,
+                        "Low FD/R": 1 - (r_data['FD'] / rounds), # Inverted for chart (Higher is better)
+                        "ADR": r_data['ADR']
+                    }
+                    max_vals = {"APR": 0.6, "KAS%": 100, "Survival%": 0.6, "Low FD/R": 1.0, "ADR": 180}
+                    
+                elif sel_role == "Controller": # Smokes
+                    metrics = {
+                        "APR": r_data['Assists'] / rounds,
+                        "KAS%": r_data['KAST'],
+                        "Survival%": (rounds - r_data['Deaths']) / rounds,
+                        "K/D": r_data['Kills'] / r_data['Deaths'] if r_data['Deaths'] > 0 else r_data['Kills'], # Replaced Clutches
+                        "ADR": r_data['ADR']
+                    }
+                    max_vals = {"APR": 0.6, "KAS%": 100, "Survival%": 0.6, "K/D": 1.5, "ADR": 170}
+                    
+                elif sel_role == "Sentinel":
+                    metrics = {
+                        "K/D": r_data['Kills'] / r_data['Deaths'] if r_data['Deaths'] > 0 else r_data['Kills'],
+                        "Survival%": (rounds - r_data['Deaths']) / rounds,
+                        "ADR": r_data['ADR'],
+                        "FK/FD Ratio": r_data['FK'] / r_data['FD'] if r_data['FD'] > 0 else r_data['FK'],
+                        "KPR": r_data['Kills'] / rounds
+                    }
+                    max_vals = {"K/D": 1.5, "Survival%": 0.7, "ADR": 180, "FK/FD Ratio": 1.5, "KPR": 1.0}
+                else:
+                    st.info("Generic stats for Flex role.")
+                    metrics = {"KPR": r_data['Kills']/rounds, "ADR": r_data['ADR']}
+                    max_vals = {"KPR": 1.0, "ADR": 150}
+
+                # Prepare Chart Data (Primary Player)
+                radar_data = [
+                    {'Player': deep_player, 'Metric': k, 'Value': min(v / max_vals.get(k, 1), 1.0), 'Display': v} 
+                    for k, v in metrics.items()
+                ]
+                
+                # Comparison Logic
+                comp_metrics = {}
+                if comp_player != "None":
+                    comp_path = os.path.join(BASE_DIR, "data", "players", f"{comp_player.lower()}_data.json")
+                    if os.path.exists(comp_path):
+                        df_comp = parse_tracker_json(comp_path)
+                        if not df_comp.empty:
+                            df_comp['Role'] = df_comp['Agent'].apply(get_role)
+                            comp_role_stats = df_comp.groupby('Role').agg({
+                                'Kills': 'sum', 'Deaths': 'sum', 'Assists': 'sum',
+                                'FK': 'sum', 'FD': 'sum', 'Clutches': 'sum',
+                                'Rounds': 'sum', 'ADR': 'mean', 'KAST': 'mean'
+                            }).reset_index()
+                            
+                            # Filter for the SAME role as primary player
+                            cr_data = comp_role_stats[comp_role_stats['Role'] == sel_role]
+                            if not cr_data.empty:
+                                cr_data = cr_data.iloc[0]
+                                c_rounds = cr_data['Rounds'] if cr_data['Rounds'] > 0 else 1
+                                
+                                # Calculate metrics using same logic
+                                if sel_role == "Duelist":
+                                    comp_metrics = {"FK/FD Ratio": cr_data['FK']/cr_data['FD'] if cr_data['FD']>0 else cr_data['FK'], "FB per Round": cr_data['FK']/c_rounds, "KPR": cr_data['Kills']/c_rounds, "ADR": cr_data['ADR'], "Survival%": (c_rounds-cr_data['Deaths'])/c_rounds}
+                                elif sel_role == "Initiator":
+                                    comp_metrics = {"APR": cr_data['Assists']/c_rounds, "KAS%": cr_data['KAST'], "Survival%": (c_rounds-cr_data['Deaths'])/c_rounds, "Low FD/R": 1-(cr_data['FD']/c_rounds), "ADR": cr_data['ADR']}
+                                elif sel_role == "Controller":
+                                    comp_metrics = {"APR": cr_data['Assists']/c_rounds, "KAS%": cr_data['KAST'], "Survival%": (c_rounds-cr_data['Deaths'])/c_rounds, "K/D": cr_data['Kills']/cr_data['Deaths'] if cr_data['Deaths']>0 else cr_data['Kills'], "ADR": cr_data['ADR']}
+                                elif sel_role == "Sentinel":
+                                    comp_metrics = {"K/D": cr_data['Kills']/cr_data['Deaths'] if cr_data['Deaths']>0 else cr_data['Kills'], "Survival%": (c_rounds-cr_data['Deaths'])/c_rounds, "ADR": cr_data['ADR'], "FK/FD Ratio": cr_data['FK']/cr_data['FD'] if cr_data['FD']>0 else cr_data['FK'], "KPR": cr_data['Kills']/c_rounds}
+                                
+                                for k, v in comp_metrics.items():
+                                    radar_data.append({'Player': comp_player, 'Metric': k, 'Value': min(v / max_vals.get(k, 1), 1.0), 'Display': v})
+
+                radar_df = pd.DataFrame(radar_data)
+                
+                with c_chart:
+                    fig_spider = px.line_polar(radar_df, r='Value', theta='Metric', color='Player', line_close=True, 
+                                              color_discrete_sequence=['#00BFFF', '#FF1493'], # Cyan for P1, Pink for P2
+                                              title=f"{sel_role} Performance Profile")
+                    fig_spider.update_traces(fill='toself')
+                    fig_spider.update_layout(
+                        polar=dict(radialaxis=dict(visible=True, showticklabels=False, range=[0, 1]), bgcolor='rgba(255,255,255,0.05)'), 
+                        paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'),
+                        legend=dict(orientation="h", y=-0.1)
+                    )
+                    st.plotly_chart(fig_spider, use_container_width=True)
+                
+                with c_stats:
+                    st.markdown(f"**{deep_player} Stats**")
+                    for k, v in metrics.items():
+                        delta = None
+                        if k in comp_metrics:
+                            delta = v - comp_metrics[k]
+                        st.metric(k, f"{v:.2f}", delta=f"{delta:.2f}" if delta is not None else None)
         
         else:
             st.info("👆 Bitte lade eine JSON-Datei hoch (Tracker.gg Match-Export oder Profil-Export), um die Analyse zu starten.")
@@ -2899,5 +3847,7 @@ elif page == "💾 DATABASE":
     st.header("Database")
     ed = st.data_editor(df, num_rows="dynamic")
     if st.button("Save"): 
+        save_matches(ed)
+        st.success("Saved to Google Sheets")
         save_matches(ed)
         st.success("Saved to Google Sheets")
