@@ -34,6 +34,7 @@ except ImportError as e:
     HAS_CLIPBOARD = False
     CLIPBOARD_ERR = str(e)
 import random
+import threading
 
 # ==============================================================================
 # 🔧 ROBUST MONKEY PATCH (Fix für Component Error & Streamlit 1.40+)
@@ -125,8 +126,10 @@ def load_users_db():
         return df_new
 
 def save_users_db(df):
-    try: conn.update(worksheet="nexus_users", data=df)
-    except Exception as e: st.error(f"DB Error: {e}")
+    def _task():
+        try: conn.update(worksheet="nexus_users", data=df)
+        except Exception as e: print(f"DB Error: {e}")
+    threading.Thread(target=_task).start()
 
 def check_credentials(username, password, df_users):
     """Check credentials against DataFrame"""
@@ -844,145 +847,135 @@ def render_visual_selection(options, type_item, key_prefix, default=None, multi=
 # --- SPEICHER FUNKTIONEN (GOOGLE SHEETS) ---
 # WICHTIG: Diese Funktionen müssen VOR der UI definiert sein
 
-def save_matches(df_new):
+def _bg_save(worksheet, data):
+    """Helper for background saving"""
     try:
-        conn.update(worksheet="nexus_matches", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
+        conn.update(worksheet=worksheet, data=data)
+        st.cache_data.clear()
+    except Exception as e:
+        print(f"Background Save Error ({worksheet}): {e}")
+
+def save_matches(df_new):
+    threading.Thread(target=_bg_save, args=("nexus_matches", df_new)).start()
 
 def save_player_stats(df_new):
-    """Saves player stats. Tries to update, if fails (missing sheet), tries to create."""
-    worksheet_name = "Premier - PlayerStats"
-    try:
-        # 1. Read existing data
+    def _task():
+        worksheet_name = "Premier - PlayerStats"
         try:
-            df_existing = conn.read(worksheet=worksheet_name, ttl=0).dropna(how="all")
-        except Exception:
-            # If sheet is empty or doesn't exist, start fresh
-            df_existing = pd.DataFrame()
+            # 1. Read existing data
+            try:
+                df_existing = conn.read(worksheet=worksheet_name, ttl=0).dropna(how="all")
+            except Exception:
+                df_existing = pd.DataFrame()
 
-        # 2. Combine new data with existing data
-        df_combined = pd.concat([df_existing, df_new], ignore_index=True)
-        
-        # Drop duplicates based on MatchID and Player to prevent re-imports
-        if 'MatchID' in df_combined.columns and 'Player' in df_combined.columns:
-            df_combined.drop_duplicates(subset=['MatchID', 'Player'], keep='last', inplace=True)
+            # 2. Combine new data with existing data
+            df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+            
+            # Drop duplicates
+            if 'MatchID' in df_combined.columns and 'Player' in df_combined.columns:
+                df_combined.drop_duplicates(subset=['MatchID', 'Player'], keep='last', inplace=True)
 
-        # 3. Clean the ENTIRE combined DataFrame
-        expected_types = {
-            'Kills': int, 'Deaths': int, 'Assists': int, 'Score': int, 'Rounds': int, 'HS': float
-        }
-        for col, dtype in expected_types.items():
-            if col in df_combined.columns:
-                df_combined[col] = pd.to_numeric(df_combined[col], errors='coerce').fillna(0)
-                df_combined[col] = df_combined[col].astype(dtype)
+            # 3. Clean
+            expected_types = {
+                'Kills': int, 'Deaths': int, 'Assists': int, 'Score': int, 'Rounds': int, 'HS': float
+            }
+            for col, dtype in expected_types.items():
+                if col in df_combined.columns:
+                    df_combined[col] = pd.to_numeric(df_combined[col], errors='coerce').fillna(0)
+                    df_combined[col] = df_combined[col].astype(dtype)
 
-        # 4. Try to Update. If sheet missing (KeyError), try Create.
-        try:
-            conn.update(worksheet=worksheet_name, data=df_combined)
-        except Exception as update_err:
-            # Check for KeyError (Sheet not found) or if the error message contains the sheet name
-            if isinstance(update_err, KeyError) or worksheet_name in str(update_err):
-                conn.create(worksheet=worksheet_name, data=df_combined)
-            else:
-                raise update_err
+            # 4. Update/Create
+            try:
+                conn.update(worksheet=worksheet_name, data=df_combined)
+            except Exception as update_err:
+                if isinstance(update_err, KeyError) or worksheet_name in str(update_err):
+                    conn.create(worksheet=worksheet_name, data=df_combined)
+                else:
+                    raise update_err
 
-        time.sleep(1)
-        st.cache_data.clear()
-
-    except Exception as e:
-        st.error(f"Save Error for '{worksheet_name}': {e}")
-        st.info("Check if the worksheet name in Google Sheets matches 'Premier - PlayerStats' exactly (watch out for spaces!).")
+            st.cache_data.clear()
+        except Exception as e:
+            print(f"Save Error for '{worksheet_name}': {e}")
+    
+    threading.Thread(target=_task).start()
 
 def save_scrims(df_new):
-    try:
-        conn.update(worksheet="scrims", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
+    threading.Thread(target=_bg_save, args=("scrims", df_new)).start()
 
 def save_scrim_availability(df_new):
-    try:
-        conn.update(worksheet="scrim_availability", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
+    threading.Thread(target=_bg_save, args=("scrim_availability", df_new)).start()
 
 def save_player_todos(df_new):
-    try:
-        conn.update(worksheet="player_todos", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
+    threading.Thread(target=_bg_save, args=("player_todos", df_new)).start()
 
 def save_legacy_playbooks(df_new):
-    try:
-        conn.update(worksheet="playbooks", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
+    threading.Thread(target=_bg_save, args=("playbooks", df_new)).start()
 
 def save_pb_strats(df_new):
-    try:
-        conn.update(worksheet="nexus_pb_strats", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
+    threading.Thread(target=_bg_save, args=("nexus_pb_strats", df_new)).start()
 
 def save_map_theory(df_new):
-    try:
-        conn.update(worksheet="nexus_map_theory", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
+    threading.Thread(target=_bg_save, args=("nexus_map_theory", df_new)).start()
 
 def save_resources(df_new):
-    try:
-        conn.update(worksheet="resources", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
+    threading.Thread(target=_bg_save, args=("resources", df_new)).start()
 
 def save_calendar(df_new):
-    try:
-        conn.update(worksheet="calendar", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
+    threading.Thread(target=_bg_save, args=("calendar", df_new)).start()
 
 def save_team_playbooks(df_new):
-    try:
-        conn.update(worksheet="nexus_playbooks", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
+    threading.Thread(target=_bg_save, args=("nexus_playbooks", df_new)).start()
 
 def save_simple_todos(df_new):
-    try:
-        conn.update(worksheet="todo", data=df_new); time.sleep(1); st.cache_data.clear()
-    except Exception as e: st.error(f"Save Error: {e}")
+    threading.Thread(target=_bg_save, args=("todo", df_new)).start()
 
 def update_availability(scrim_id, player, status):
-    """Update or create availability entry for a player (GSheet Version)"""
-    try:
-        df_avail = conn.read(worksheet="scrim_availability", ttl=0)
-        if df_avail.empty or 'ScrimID' not in df_avail.columns:
-            df_avail = pd.DataFrame(columns=['ScrimID', 'Player', 'Available', 'UpdatedAt'])
-    except:
-        df_avail = pd.DataFrame(columns=['ScrimID', 'Player', 'Available', 'UpdatedAt'])
-    
-    mask = (df_avail['ScrimID'] == scrim_id) & (df_avail['Player'] == player)
-    
-    if mask.any():
-        df_avail.loc[mask, 'Available'] = status
-        df_avail.loc[mask, 'UpdatedAt'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        new_entry = {
-            'ScrimID': scrim_id,
-            'Player': player,
-            'Available': status,
-            'UpdatedAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        df_avail = pd.concat([df_avail, pd.DataFrame([new_entry])], ignore_index=True)
-    
-    save_scrim_availability(df_avail)
+    def _task():
+        try:
+            try:
+                df_avail = conn.read(worksheet="scrim_availability", ttl=0)
+                if df_avail.empty or 'ScrimID' not in df_avail.columns:
+                    df_avail = pd.DataFrame(columns=['ScrimID', 'Player', 'Available', 'UpdatedAt'])
+            except:
+                df_avail = pd.DataFrame(columns=['ScrimID', 'Player', 'Available', 'UpdatedAt'])
+            
+            mask = (df_avail['ScrimID'] == scrim_id) & (df_avail['Player'] == player)
+            
+            if mask.any():
+                df_avail.loc[mask, 'Available'] = status
+                df_avail.loc[mask, 'UpdatedAt'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                new_entry = {
+                    'ScrimID': scrim_id,
+                    'Player': player,
+                    'Available': status,
+                    'UpdatedAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                df_avail = pd.concat([df_avail, pd.DataFrame([new_entry])], ignore_index=True)
+            
+            conn.update(worksheet="scrim_availability", data=df_avail)
+            st.cache_data.clear()
+        except Exception as e:
+            print(f"Update Availability Error: {e}")
+    threading.Thread(target=_task).start()
 
 def delete_scrim(scrim_id):
-    """Delete a scrim and all its availability data (GSheet Version)"""
-    try:
-        df_scrims = conn.read(worksheet="scrims", ttl=0)
-        if not df_scrims.empty and 'ID' in df_scrims.columns:
-            df_scrims = df_scrims[df_scrims['ID'] != scrim_id]
-            save_scrims(df_scrims)
-        
-        # Delete availability
-        df_avail = conn.read(worksheet="scrim_availability", ttl=0)
-        if not df_avail.empty and 'ScrimID' in df_avail.columns:
-            df_avail = df_avail[df_avail['ScrimID'] != scrim_id]
-            save_scrim_availability(df_avail)
-    except Exception as e:
-        st.error(f"Error deleting scrim: {e}")
+    def _task():
+        try:
+            df_scrims = conn.read(worksheet="scrims", ttl=0)
+            if not df_scrims.empty and 'ID' in df_scrims.columns:
+                df_scrims = df_scrims[df_scrims['ID'] != scrim_id]
+                conn.update(worksheet="scrims", data=df_scrims)
+            
+            df_avail = conn.read(worksheet="scrim_availability", ttl=0)
+            if not df_avail.empty and 'ScrimID' in df_avail.columns:
+                df_avail = df_avail[df_avail['ScrimID'] != scrim_id]
+                conn.update(worksheet="scrim_availability", data=df_avail)
+            
+            st.cache_data.clear()
+        except Exception as e:
+            print(f"Error deleting scrim: {e}")
+    threading.Thread(target=_task).start()
 
 # ==============================================================================
 # 🛠️ UPDATE: PARSER MIT UTILITY & AGENT STATS
