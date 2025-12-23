@@ -234,8 +234,434 @@ if 'authenticated' not in st.session_state or not st.session_state.authenticated
 
 st.markdown("""
 <style>
-    /* ... (CSS bleibt gleich, hier gekürzt für Lesbarkeit) ... */
-    .stApp { background-color: #050505; color: #e0e0e0; }
+    /* --- GLOBAL THEME --- */
+    .stApp { 
+        background-color: #050505; 
+        background-image: radial-gradient(circle at 50% 0%, #1a1a2e 0%, #050505 60%);
+        color: #e0e0e0; 
+    }
+    [data-testid="stSidebar"] { 
+        background-color: #080810;
+        border-right: 1px solid #333; 
+    }
+    
+    /* --- TYPOGRAPHY & GRADIENTS --- */
+    h1, h2, h3 {
+        background: linear-gradient(90deg, #00BFFF 0%, #FF1493 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 900 !important;
+        text-transform: uppercase;
+        font-family: 'Segoe UI', sans-serif;
+        letter-spacing: 1px;
+    }
+    
+    /* --- NEON CARDS & BOXES --- */
+    div.stContainer {
+        border-radius: 12px;
+    }
+
+    /* Stat Box (Map Analyzer) */
+    .stat-box { 
+        border-radius: 12px;
+        padding: 20px; 
+        text-align: center; 
+        background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%);
+        border: 1px solid rgba(255,255,255,0.1); 
+        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        backdrop-filter: blur(5px);
+        transition: all 0.3s ease;
+    }
+    .stat-box:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 0 20px rgba(0, 191, 255, 0.2);
+    }
+    .stat-val { font-size: 2.5em; font-weight: 800; color: white;
+        text-shadow: 0 0 10px rgba(255,255,255,0.3); }
+    .stat-lbl { font-size: 0.8em; text-transform: uppercase; letter-spacing: 2px; color: rgba(255,255,255,0.6);
+        margin-top: 5px; }
+    
+    /* Playbook Cards */
+    .pb-card {
+        background: linear-gradient(90deg, #0f0f16 0%, #161625 100%);
+        border: 1px solid #333;
+        border-left: 4px solid #00BFFF;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 10px;
+        transition: all 0.3s;
+    }
+    .pb-card:hover {
+        border-color: #FF1493;
+        box-shadow: 0 0 15px rgba(255, 20, 147, 0.2);
+        transform: translateX(5px);
+    }
+
+    /* --- CONFIDENCE SCALE --- */
+    .conf-scroll-wrapper {
+        display: flex;
+        overflow-x: auto; padding-bottom: 15px; margin-bottom: 20px; gap: 15px;
+        scrollbar-width: thin; scrollbar-color: #00BFFF #111;
+    }
+    .conf-card {
+        flex: 0 0 170px; 
+        background: #101018;
+        border-radius: 12px; overflow: hidden;
+        border: 1px solid #333; text-align: center; 
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .conf-card:hover { transform: translateY(-5px); box-shadow: 0 5px 15px rgba(0,0,0,0.5); border-color: #666;
+    }
+    .conf-img-container { width: 100%; height: 90px; overflow: hidden; border-bottom: 1px solid #333;
+    }
+    .conf-img-container img { width: 100%; height: 100%; object-fit: cover; filter: brightness(0.8); transition: filter 0.3s;
+    }
+    .conf-card:hover img { filter: brightness(1.1); }
+    .conf-body { padding: 12px;
+    }
+    .conf-val { font-size: 1.6em; font-weight: bold; text-shadow: 0 2px 5px rgba(0,0,0,0.8);
+    }
+    
+    /* --- RECENT MATCHES --- */
+    .rec-card { 
+        background: linear-gradient(to right, rgba(255,255,255,0.03), transparent);
+        border-left: 4px solid #555; 
+        padding: 12px; margin-bottom: 10px; border-radius: 6px; 
+        border-top: 1px solid rgba(255,255,255,0.05);
+    }
+
+    /* --- PROTOCOLS (IF/THEN) --- */
+    .proto-box { 
+        background: rgba(20,20,30,0.6);
+        border-left: 3px solid #00BFFF; 
+        padding: 12px; margin-bottom: 8px; border-radius: 0 8px 8px 0; 
+        border: 1px solid rgba(0,191,255,0.1);
+    }
+    .proto-if { color: #FFD700; font-size: 0.85em; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .proto-then { color: #fff; font-size: 1em; margin-top: 4px; padding-left: 10px; border-left: 1px solid #444;
+    }
+
+    /* Inputs */
+    div[data-testid="stTextInput"] input, div[data-testid="stTextArea"] textarea {
+        background-color: #1a1a25;
+        color: white;
+        border: 1px solid #444;
+    }
+    div[data-testid="stSelectbox"] > div > div {
+        background-color: #1a1a25;
+        color: white;
+    }
+    
+    /* Button Primary override for canvas save */
+    button[kind="primary"] {
+        background: linear-gradient(90deg, #00BFFF, #FF1493) !important;
+        border: none !important;
+        color: white !important;
+        font-weight: bold !important;
+    }
+
+    /* --- VALORANT STYLE MATCH CARD (REVISED LAYOUT) --- */
+    .val-card {
+        background-color: #121212;
+        border-radius: 4px;
+        margin-bottom: 8px;
+        display: flex; /* Flexbox aktiviert: Elemente liegen nebeneinander */
+        align-items: center;
+        height: 90px;
+        overflow: hidden;
+        border: 1px solid #222;
+        position: relative;
+        transition: transform 0.2s, background-color 0.2s;
+    }
+    .val-card:hover {
+        transform: translateX(4px);
+        background-color: #1a1a1a;
+    }
+    .val-bar {
+        width: 6px;
+        height: 100%;
+        flex-shrink: 0;
+        /* Darf nicht schrumpfen */
+    }
+
+    /* ZONE 1: MAP & NAME */
+    .val-map-section {
+        width: 180px;
+        /* Feste Breite für den Map-Bereich */
+        height: 100%;
+        position: relative;
+        flex-shrink: 0;
+        margin-right: 15px;
+    }
+    .val-map-bg {
+        position: absolute;
+        top: 0; left: 0; width: 100%; height: 100%;
+        background-size: cover;
+        background-position: center;
+        /* Verlauf damit Text lesbar ist, aber rechts hart endet für Trennung */
+        background: linear-gradient(to right, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.9) 100%);
+        z-index: 0;
+    }
+    .val-map-text {
+        position: absolute;
+        top: 50%; left: 15px;
+        transform: translateY(-50%);
+        z-index: 1;
+    }
+    .val-map-name {
+        font-weight: 900;
+        font-size: 1.4em;
+        color: white;
+        text-transform: uppercase;
+        line-height: 1;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+    }
+
+    /* ZONE 2: COMPS (Nach Links gerückt) */
+    .val-comps-section {
+        display: flex;
+        flex-direction: column;
+        /* Teams untereinander statt nebeneinander für Platz */
+        justify-content: center;
+        gap: 4px;
+        margin-right: 20px;
+        flex-shrink: 0;
+    }
+    .val-agent-row {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+    }
+    .val-team-label {
+        font-size: 0.6em;
+        color: #666;
+        width: 20px;
+        text-align: right;
+        margin-right: 4px;
+        font-weight: bold;
+    }
+    .val-agent-img {
+        width: 32px;
+        /* Etwas kleiner damit sie untereinander passen */
+        height: 32px;
+        border-radius: 3px;
+        border: 1px solid #333;
+        background: #000;
+    }
+
+    /* ZONE 3: STATS (Die Mitte - Der neue "Freie Platz") */
+    .val-stats-section {
+        flex-grow: 1;
+        /* Nimmt den restlichen Platz ein */
+        display: flex;
+        flex-direction: row;
+        justify-content: center;
+        /* Zentriert die Stats */
+        align-items: center;
+        gap: 20px;
+        /* Abstand zwischen den Stat-Gruppen */
+        color: #ccc;
+        font-family: 'Segoe UI', sans-serif;
+    }
+    .stat-group {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .stat-label {
+        font-size: 0.65em;
+        text-transform: uppercase;
+        color: #777;
+        letter-spacing: 1px;
+        margin-bottom: 2px;
+    }
+    .stat-value {
+        font-size: 0.9em;
+        font-weight: 700;
+        color: #eee;
+    }
+    .stat-date {
+        font-size: 0.8em;
+        color: #aaa;
+        font-style: italic;
+    }
+
+    /* ZONE 4: SCORE (Rechts) */
+    .val-score-section {
+        width: 120px;
+        text-align: right;
+        padding-right: 20px;
+        flex-shrink: 0;
+    }
+    .val-score {
+        font-weight: 900;
+        font-size: 2.2em;
+        line-height: 1;
+    }
+    .val-vod-link {
+        font-size: 0.75em;
+        font-weight: 700;
+        text-transform: uppercase;
+        display: block;
+        margin-top: 4px;
+        text-decoration: none;
+        opacity: 0.7;
+    }
+    .val-vod-link:hover { opacity: 1; text-decoration: underline;
+    }
+
+    /* --- POWER RANKING CARD DESIGN (FIXED & COMPACT) --- */
+    .rank-row {
+        background-color: #121212;
+        border: 1px solid #222;
+        border-radius: 4px;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        padding: 4px 8px;
+        /* Etwas mehr seitliches Padding */
+        height: 54px;
+        /* Kompakte Höhe */
+        transition: transform 0.2s, background-color 0.2s;
+        overflow: hidden;
+    }
+    .rank-row:hover {
+        background-color: #1a1a1a;
+        transform: translateX(4px);
+        border-color: #333;
+    }
+    
+    /* Map Bild */
+    .rank-img-box {
+        width: 120px;
+        height: 100%;
+        border-radius: 3px;
+        overflow: hidden;
+        margin-right: 12px;
+        flex-shrink: 0;
+    }
+    .rank-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    
+    /* Map Name - Schriftgröße angepasst */
+    .rank-name {
+        width: 80px;
+        font-family: 'Segoe UI', sans-serif;
+        font-weight: 800;
+        font-size: 14px;          /* Fest auf 14px gesetzt */
+        color: white;
+        text-transform: uppercase;
+        margin-right: 10px;
+        flex-shrink: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Stats Container */
+    .rank-stats {
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 4px;                 /* Kleiner Abstand zwischen den Balken */
+    }
+    
+    /* Einzelne Zeile (Label - Balken - Zahl) */
+    .stat-line {
+        display: flex;
+        align-items: center;
+        height: 18px;             /* Fixe Höhe pro Zeile */
+    }
+    
+    /* Label (RATING / WIN%) */
+    .stat-label {
+        width: 50px;
+        /* Etwas breiter damit nichts umbricht */
+        color: #666;
+        font-weight: 700;
+        font-size: 10px;
+        /* Sehr klein und fein */
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    /* Balken Hintergrund */
+    .prog-bg {
+        flex-grow: 1;
+        height: 6px;              /* Dünner Balken */
+        background-color: #252525;
+        border-radius: 3px;
+        margin: 0 10px;
+        overflow: hidden;
+    }
+    
+    /* Balken Füllung */
+    .prog-fill {
+        height: 100%;
+        border-radius: 3px;
+    }
+    
+    /* Die Zahl am Ende (WICHTIG!) */
+    .stat-val {
+        width: 45px;
+        /* Verbreitert! Vorher 30px -> zu eng */
+        text-align: right;
+        font-weight: 800;
+        font-family: 'Consolas', 'Monaco', monospace; /* Monospace für saubere Ausrichtung */
+        font-size: 12px;
+        /* Gut lesbare Größe */
+        line-height: 1;
+    }
+
+    /* --- CALENDAR & TODO --- */
+    .cal-day-box {
+        min-height: 120px;
+        /* Bigger height for calendar boxes */
+        background-color: #121212;
+        border: 1px solid #333;
+        border-radius: 6px;
+        padding: 8px;
+        margin: 2px;
+        transition: transform 0.2s, border-color 0.2s;
+        overflow: hidden;
+    }
+    .cal-day-box:hover {
+        border-color: #00BFFF;
+        background-color: #1a1a1a;
+    }
+    .cal-date {
+        font-weight: 900;
+        color: #555;
+        margin-bottom: 5px;
+        font-size: 1.1em;
+    }
+    .cal-today {
+        border: 1px solid #00BFFF !important;
+        background-color: #0f1820 !important;
+    }
+    .cal-today .cal-date { color: #00BFFF;
+    }
+    
+    .cal-event-pill {
+        margin-top: 3px;
+        padding: 3px 6px;
+        border-radius: 3px;
+        font-size: 0.75em;
+        font-weight: 700;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: white;
+        display: block;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        border-left-width: 3px;
+        border-left-style: solid;
+    }
 </style>
 """, unsafe_allow_html=True)
 
