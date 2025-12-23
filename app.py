@@ -1597,14 +1597,14 @@ elif page == "👥 COACHING":
         with tab1:
             st.markdown("### 📝 Assign Tasks to Players")
             
-            with st.form("assign_todo", clear_on_submit=True):
+            with st.form("assign_todo"):
                 col1, col2 = st.columns(2)
                 
                 with col1:
                     player = st.selectbox("Select Player", 
                                             ["Luggi","Benni","Andrei","Luca","Sofi","Remus"],
-                                            format_func=lambda x: f"🎮 {x}")
-                    title = st.text_input("Task Title", placeholder="e.g., Review Ascent Defense")
+                                            format_func=lambda x: f"🎮 {x}", key="todo_player")
+                    title = st.text_input("Task Title", placeholder="e.g., Review Ascent Defense", key="todo_title")
                 
                 with col2:
                     # Playbook selection
@@ -1618,13 +1618,13 @@ elif page == "👥 COACHING":
                     
                     playbook_link = st.selectbox("Link Playbook (optional)", 
                                                 ["None"] + all_playbooks,
-                                                help="Select a playbook to link to this task")
+                                                help="Select a playbook to link to this task", key="todo_pb_link")
                     
                     youtube_link = st.text_input("YouTube Link (optional)", 
-                                                placeholder="https://youtube.com/watch?v=...")
+                                                placeholder="https://youtube.com/watch?v=...", key="todo_yt")
                 
                 description = st.text_area("Task Description", 
-                                            placeholder="Detailed instructions for the player...")
+                                            placeholder="Detailed instructions for the player...", key="todo_desc")
                 
                 submitted = st.form_submit_button("📤 Assign Task")
                 
@@ -1664,6 +1664,10 @@ elif page == "👥 COACHING":
                         
                         # DISCORD NOTIFICATION
                         send_discord_notification(player, title, description)
+                        
+                        # Manual Clear
+                        for k in ["todo_title", "todo_yt", "todo_desc"]:
+                            if k in st.session_state: del st.session_state[k]
                         
                         st.success(f"Task '{title}' assigned to {player}!")
                         st.rerun()
@@ -1789,13 +1793,18 @@ elif page == "⚽ SCRIMS":
     current_user = st.session_state.get('username', '')
     user_role = st.session_state.get('role', '')
     
-    tabs = ["📅 View Scrims"]
-    if user_role == 'coach':
-        tabs.append("➕ Create Scrim")
+    # --- NAVIGATION (Radio instead of Tabs for programmatic redirect) ---
+    if 'scrim_nav' not in st.session_state: st.session_state.scrim_nav = "📅 View Scrims"
     
-    tab1, *other_tabs = st.tabs(tabs)
+    nav_opts = ["📅 View Scrims"]
+    if user_role == 'coach': nav_opts.append("➕ Create Scrim")
     
-    with tab1:
+    # Ensure valid state
+    if st.session_state.scrim_nav not in nav_opts: st.session_state.scrim_nav = nav_opts[0]
+    
+    st.session_state.scrim_nav = st.radio("Scrim Nav", nav_opts, index=nav_opts.index(st.session_state.scrim_nav), horizontal=True, label_visibility="collapsed", key="scrim_nav_radio")
+    
+    if st.session_state.scrim_nav == "📅 View Scrims":
         st.markdown("### 📅 Upcoming Scrims")
         if df_scrims.empty:
             st.info("No scrims scheduled yet.")
@@ -1857,44 +1866,49 @@ elif page == "⚽ SCRIMS":
                             if st.button("🗑️ Delete Scrim", key=f"del_{scrim_id}", use_container_width=True):
                                 delete_scrim(scrim_id); st.rerun()
 
-    if user_role == 'coach':
-        with other_tabs[0]:
-            st.markdown("### ➕ Create New Scrim")
-            with st.form("create_scrim", clear_on_submit=True):
-                c1, c2 = st.columns(2)
-                with c1:
-                    title = st.text_input("Scrim Title", placeholder="e.g., Weekly Scrim vs Team X")
-                    date = st.date_input("Date", min_value=datetime.today().date())
-                    time = st.time_input("Time")
-                with c2:
-                    map_name = st.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"])
-                    description = st.text_area("Description", placeholder="e.g., Focus on B-Site retakes")
-                
-                st.markdown("---")
-                st.markdown("##### Optional Links")
-                c3, c4 = st.columns(2)
-                with c3:
-                    all_playbooks = ["None"]
-                    if not df_team_pb.empty: all_playbooks.extend([f"Team: {pb}" for pb in df_team_pb.get('Name', [])])
-                    if not df_legacy_pb.empty: all_playbooks.extend([f"Legacy: {pb}" for pb in df_legacy_pb.get('Name', [])])
-                    playbook_link = st.selectbox("Link Playbook", all_playbooks)
-                with c4:
-                    video_link = st.text_input("Video Link (VOD, YouTube, etc.)")
+    elif st.session_state.scrim_nav == "➕ Create Scrim":
+        st.markdown("### ➕ Create New Scrim")
+        with st.form("create_scrim"):
+            c1, c2 = st.columns(2)
+            with c1:
+                title = st.text_input("Scrim Title", placeholder="e.g., Weekly Scrim vs Team X", key="scrim_title")
+                date = st.date_input("Date", min_value=datetime.today().date(), key="scrim_date")
+                time = st.time_input("Time", key="scrim_time")
+            with c2:
+                map_name = st.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"], key="scrim_map")
+                description = st.text_area("Description", placeholder="e.g., Focus on B-Site retakes", key="scrim_desc")
+            
+            st.markdown("---")
+            st.markdown("##### Optional Links")
+            c3, c4 = st.columns(2)
+            with c3:
+                all_playbooks = ["None"]
+                if not df_team_pb.empty: all_playbooks.extend([f"Team: {pb}" for pb in df_team_pb.get('Name', [])])
+                if not df_legacy_pb.empty: all_playbooks.extend([f"Legacy: {pb}" for pb in df_legacy_pb.get('Name', [])])
+                playbook_link = st.selectbox("Link Playbook", all_playbooks, key="scrim_pb")
+            with c4:
+                video_link = st.text_input("Video Link (VOD, YouTube, etc.)", key="scrim_vid")
 
-                if st.form_submit_button("Create Scrim", type="primary", use_container_width=True):
-                    if not title: st.error("Please enter a scrim title.")
-                    else:
-                        scrim_id = str(uuid.uuid4())[:8]
-                        new_scrim = {
-                            'ID': scrim_id, 'Title': title, 'Date': date.strftime("%Y-%m-%d"),
-                            'Time': time.strftime("%H:%M"), 'Map': map_name, 'Description': description,
-                            'CreatedBy': current_user, 'CreatedAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            'PlaybookLink': playbook_link if playbook_link != "None" else "",
-                            'VideoLink': video_link
-                        }
-                        updated = pd.concat([df_scrims, pd.DataFrame([new_scrim])], ignore_index=True)
-                        save_scrims(updated)
-                        st.success(f"Scrim '{title}' created!"); st.rerun()
+            if st.form_submit_button("Create Scrim", type="primary", use_container_width=True):
+                if not title: st.error("Please enter a scrim title.")
+                else:
+                    scrim_id = str(uuid.uuid4())[:8]
+                    new_scrim = {
+                        'ID': scrim_id, 'Title': title, 'Date': date.strftime("%Y-%m-%d"),
+                        'Time': time.strftime("%H:%M"), 'Map': map_name, 'Description': description,
+                        'CreatedBy': current_user, 'CreatedAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        'PlaybookLink': playbook_link if playbook_link != "None" else "",
+                        'VideoLink': video_link
+                    }
+                    updated = pd.concat([df_scrims, pd.DataFrame([new_scrim])], ignore_index=True)
+                    save_scrims(updated)
+                    
+                    # Manual Clear & Redirect
+                    for k in ["scrim_title", "scrim_desc", "scrim_vid"]:
+                        if k in st.session_state: del st.session_state[k]
+                    
+                    st.session_state.scrim_nav = "📅 View Scrims"
+                    st.success(f"Scrim '{title}' created!"); st.rerun()
 
 # ==============================================================================
 # 2. MATCH ENTRY (AUTO PLAYER STATS)
@@ -1967,7 +1981,7 @@ elif page == "📝 MATCH ENTRY":
             except Exception as e: st.error(str(e))
 
     d = st.session_state['fd']
-    with st.form("e", clear_on_submit=True):
+    with st.form("e"):
         c1,c2=st.columns(2)
         with c1:
             maps=sorted(["Ascent","Bind","Haven","Split","Lotus","Sunset","Abyss","Pearl","Fracture","Icebox","Breeze","Corrode"])
@@ -2155,9 +2169,9 @@ elif page == "📘 STRATEGY BOARD":
             with c1: st.subheader("Active Playbooks")
             with c2: 
                 with st.popover("➕ New Playbook"):
-                    with st.form("create_pb", clear_on_submit=True):
-                        pm = st.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"])
-                        pn = st.text_input("Playbook Name (e.g. 'Standard Default')")
+                    with st.form("create_pb"):
+                        pm = st.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"], key="new_pb_map")
+                        pn = st.text_input("Playbook Name (e.g. 'Standard Default')", key="new_pb_name")
                         st.caption("Select Composition:")
                         ac = st.columns(5)
                         ags = sorted([os.path.basename(x).replace(".png","").capitalize() for x in glob.glob(os.path.join(ASSET_DIR, "agents", "*.png"))])
@@ -2170,6 +2184,10 @@ elif page == "📘 STRATEGY BOARD":
                             
                             updated = pd.concat([df_team_pb, pd.DataFrame([new_row])], ignore_index=True)
                             save_team_playbooks(updated)
+                            
+                            # Manual Clear
+                            if "new_pb_name" in st.session_state: del st.session_state["new_pb_name"]
+                            
                             st.rerun()
 
             if not df_team_pb.empty:
@@ -2679,11 +2697,11 @@ elif page == "📘 STRATEGY BOARD":
                 else:
                     st.warning(f"Clipboard feature unavailable. Error: {CLIPBOARD_ERR}\n\nTry restarting the app if you just installed `st-img-pastebutton`.")
 
-                with st.form("add_pb_strat", clear_on_submit=True):
+                with st.form("add_pb_strat"):
                     c_name, c_tag = st.columns([3, 1])
-                    sn = c_name.text_input("Strategy Name")
-                    s_tag = c_tag.selectbox("Tag", ["Default", "Set Play", "Pistol", "Eco", "Anti-Eco", "Bonus", "Retake"])
-                    s_note = st.text_area("Notes (Optional)")
+                    sn = c_name.text_input("Strategy Name", key="strat_name")
+                    s_tag = c_tag.selectbox("Tag", ["Default", "Set Play", "Pistol", "Eco", "Anti-Eco", "Bonus", "Retake"], key="strat_tag")
+                    s_note = st.text_area("Notes (Optional)", key="strat_note")
                     
                     si = st.file_uploader("Or Upload a File", type=['png', 'jpg'])
 
@@ -2715,6 +2733,10 @@ elif page == "📘 STRATEGY BOARD":
                             
                             updated = pd.concat([df_pb_strats, pd.DataFrame([new_strat])], ignore_index=True)
                             save_pb_strats(updated)
+                            
+                            # Manual Clear
+                            for k in ["strat_name", "strat_note"]:
+                                if k in st.session_state: del st.session_state[k]
                             st.rerun()
                         else:
                             st.error("A Strategy Name and an Image (pasted or uploaded) are required.")
@@ -2928,7 +2950,7 @@ elif page == "📘 STRATEGY BOARD":
                 pasted_lu = paste(label="📋 Paste Image", key="paste_lu")
                 if pasted_lu: st.success("Image captured!")
             
-            with st.form("add_lineup", clear_on_submit=True):
+            with st.form("add_lineup"):
                 c1, c2 = st.columns(2)
                 l_map = c1.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"], key="lu_map")
                 l_agent = c2.selectbox("Agent", sorted(df_players['Agent'].unique()) if not df_players.empty else ["Sova"], key="lu_agent")
@@ -2937,9 +2959,9 @@ elif page == "📘 STRATEGY BOARD":
                 l_side = c3.selectbox("Side", ["Attack", "Defense"], key="lu_side")
                 l_type = c4.selectbox("Type", ["Recon", "Shock", "Molly", "Flash", "Smoke", "Wall", "Ult", "One-Way"], key="lu_type")
                 
-                l_title = st.text_input("Title", placeholder="e.g. B Main God Arrow")
-                l_desc = st.text_area("Description / Instructions")
-                l_vid = st.text_input("Video Link (optional)")
+                l_title = st.text_input("Title", placeholder="e.g. B Main God Arrow", key="lu_title")
+                l_desc = st.text_area("Description / Instructions", key="lu_desc")
+                l_vid = st.text_input("Video Link (optional)", key="lu_vid")
                 l_file = st.file_uploader("Upload Image (optional)", type=['png', 'jpg'])
                 
                 if st.form_submit_button("💾 Save Lineup", type="primary"):
@@ -2970,6 +2992,10 @@ elif page == "📘 STRATEGY BOARD":
                         updated = pd.concat([df_lineups, pd.DataFrame([new_lu])], ignore_index=True)
                         save_lineups(updated)
                         st.success("Lineup saved!")
+                        
+                        # Manual Clear
+                        for k in ["lu_title", "lu_desc", "lu_vid"]:
+                            if k in st.session_state: del st.session_state[k]
                         st.rerun()
 
         st.divider()
@@ -3017,7 +3043,7 @@ elif page == "📘 STRATEGY BOARD":
         
         # --- 1. ADD NEW LINK ---
         with st.expander("➕ Add New External Link"):
-            with st.form("pb_link_form", clear_on_submit=True):
+            with st.form("pb_link_form"):
                 c1, c2 = st.columns([1, 2])
                 with c1:
                     pm = st.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"], key="lm")
@@ -3037,6 +3063,10 @@ elif page == "📘 STRATEGY BOARD":
                         updated = pd.concat([pb_df, pd.DataFrame([nr])], ignore_index=True)
                         save_legacy_playbooks(updated)
                         st.success("Link saved!")
+                        
+                        # Manual Clear
+                        for k in ["ln", "ll"]:
+                            if k in st.session_state: del st.session_state[k]
                         st.rerun()
                     else:
                         st.error("Name and Link are required.")
@@ -3112,11 +3142,14 @@ elif page == "📚 RESOURCES":
     # df_res loaded globally
     
     with st.expander("➕ Add"):
-        with st.form("ra", clear_on_submit=True):
-            rt = st.text_input("Title"); rl = st.text_input("Link"); rc = st.selectbox("Cat", ["Theory", "Lineups", "Setup", "Playbook Theory"]); rn = st.text_area("Note")
+        with st.form("ra"):
+            rt = st.text_input("Title", key="res_title"); rl = st.text_input("Link", key="res_link"); rc = st.selectbox("Cat", ["Theory", "Lineups", "Setup", "Playbook Theory"], key="res_cat"); rn = st.text_area("Note", key="res_note")
             if st.form_submit_button("Save"):
                 updated = pd.concat([df_res, pd.DataFrame([{'Title': rt, 'Link': rl, 'Category': rc, 'Note': rn}])], ignore_index=True)
                 save_resources(updated)
+                # Manual Clear
+                for k in ["res_title", "res_link", "res_note"]:
+                    if k in st.session_state: del st.session_state[k]
                 st.rerun()
     
     if not df_res.empty:
@@ -3202,19 +3235,27 @@ elif page == "📅 CALENDAR":
         
         with st.expander("Add Event"):
             with st.form("ca", clear_on_submit=True):
+            with st.form("ca"):
                 c_d, c_t = st.columns(2)
                 cd=c_d.date_input("Date"); ct=c_t.time_input("Time")
                 ce=st.text_input("Event Name"); 
+                cd=c_d.date_input("Date", key="cal_date"); ct=c_t.time_input("Time", key="cal_time")
+                ce=st.text_input("Event Name", key="cal_name"); 
                 c_m, c_ty = st.columns(2)
                 cm=c_m.text_input("Map (Optional)"); cty=c_ty.selectbox("Type",["Match","Scrim","Other"])
+                cm=c_m.text_input("Map (Optional)", key="cal_map"); cty=c_ty.selectbox("Type",["Match","Scrim","Other"], key="cal_type")
                 
                 # Player Selector
                 cp = st.multiselect("Assign Players", ["Luggi","Benni","Andrei","Luca","Sofi","Remus"], default=[])
+                cp = st.multiselect("Assign Players", ["Luggi","Benni","Andrei","Luca","Sofi","Remus"], default=[], key="cal_players")
                 
                 if st.form_submit_button("Add"):
                     p_str = ", ".join(cp)
                     updated = pd.concat([df_cal, pd.DataFrame([{'Date':cd.strftime("%d.%m.%Y"),'Time':ct.strftime("%H:%M"),'Event':ce,'Map':cm,'Type':cty,'Players':p_str}])], ignore_index=True)
                     save_calendar(updated)
+                    # Manual Clear
+                    for k in ["cal_name", "cal_map", "cal_players"]:
+                        if k in st.session_state: del st.session_state[k]
                     st.rerun()
 
         with st.expander("Manage Events (Edit Dates / Delete)"):
