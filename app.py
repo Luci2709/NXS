@@ -808,7 +808,7 @@ def render_visual_selection(options, type_item, key_prefix, default=None, multi=
 # ==============================================================================
 
 # --- NEW: SURGICAL DB OPERATIONS (FAST) ---
-def db_insert(table_name, record):
+def db_insert(table_name, record, state_key=None):
     """Inserts a single record directly. Much faster than syncing the whole DF."""
     try:
         # Map ID -> id for Supabase
@@ -816,13 +816,17 @@ def db_insert(table_name, record):
         if 'ID' in rec: rec['id'] = rec.pop('ID')
         
         supabase.table(table_name).insert(rec).execute()
-        st.cache_data.clear()
+        
+        # Optimistic UI Update
+        if state_key and state_key in st.session_state:
+            st.session_state[state_key] = pd.concat([st.session_state[state_key], pd.DataFrame([record])], ignore_index=True)
+            
         return True
     except Exception as e:
         st.error(f"Database Insert Error ({table_name}): {e}")
         return False
 
-def db_update(table_name, record):
+def db_update(table_name, record, state_key=None, id_col='ID'):
     """Updates a single record by ID."""
     try:
         rec = record.copy()
@@ -830,17 +834,31 @@ def db_update(table_name, record):
         if 'id' not in rec: raise ValueError("Missing ID for update")
         
         supabase.table(table_name).update(rec).eq("id", rec['id']).execute()
-        st.cache_data.clear()
+        
+        # Optimistic UI Update
+        if state_key and state_key in st.session_state:
+            df = st.session_state[state_key]
+            # Find index of row with this ID
+            idx = df[df[id_col] == record.get(id_col)].index
+            if not idx.empty:
+                for k, v in record.items():
+                    df.at[idx[0], k] = v
+                st.session_state[state_key] = df
+
         return True
     except Exception as e:
         st.error(f"Database Update Error ({table_name}): {e}")
         return False
 
-def db_delete(table_name, record_id):
+def db_delete(table_name, record_id, state_key=None, id_col='ID'):
     """Deletes a single record by ID."""
     try:
         supabase.table(table_name).delete().eq("id", record_id).execute()
-        st.cache_data.clear()
+        
+        if state_key and state_key in st.session_state:
+            df = st.session_state[state_key]
+            st.session_state[state_key] = df[df[id_col] != record_id]
+            
         return True
     except Exception as e:
         st.error(f"Database Delete Error ({table_name}): {e}")
@@ -882,8 +900,6 @@ def _sync_data(table_name, df):
         
         if records:
             supabase.table(table_name).upsert(records).execute()
-        
-        st.cache_data.clear()
     except Exception as e:
         print(f"Sync Error ({table_name}): {e}")
 
@@ -900,7 +916,6 @@ def _upsert_only(table_name, df):
         records = df_save.where(pd.notnull(df_save), None).to_dict(orient='records')
         if records:
             supabase.table(table_name).upsert(records).execute()
-        st.cache_data.clear()
     except Exception as e:
         print(f"Upsert Error ({table_name}): {e}")
 
@@ -942,7 +957,6 @@ def update_availability(scrim_id, player, status):
             data['id'] = res.data[0]['id']
         
         supabase.table("scrim_availability").upsert(data).execute()
-        st.cache_data.clear()
     except Exception as e: print(f"Avail Update Error: {e}")
 
 def delete_scrim(scrim_id):
@@ -957,44 +971,58 @@ def delete_scrim(scrim_id):
 # 🚀 DATA LOADER
 # ==============================================================================
 
-@st.cache_data(ttl=3600, show_spinner=False)
+# REMOVED @st.cache_data to allow session_state management
 def load_data(dummy=None):
-    all_table_names = [
-        "nexus_matches", "Premier - PlayerStats", "scrims", "scrim_availability",
-        "player_todos", "nexus_playbooks", "playbooks",
-        "nexus_pb_strats", "nexus_map_theory", "resources", "calendar", "todo", "nexus_vod_reviews", "nexus_lineups"
-    ]
-    
-    all_sheets = {}
-    prog_bar = st.progress(0, text="Connecting to Supabase...")
-    
-    for i, name in enumerate(all_table_names):
-        prog_bar.progress(i / len(all_table_names), text=f"Fetching {name}...")
-        try:
-            response = supabase.table(name).select("*").execute()
-            df = pd.DataFrame(response.data)
-            # Important: Rename 'id' to 'ID' for app compatibility
-            if 'id' in df.columns: df.rename(columns={'id': 'ID'}, inplace=True)
-            all_sheets[name] = df
-        except Exception as e:
-            # print(f"Error loading {name}: {e}")
-            all_sheets[name] = pd.DataFrame()
-            
-    prog_bar.empty()
+    # Define mapping: Table Name -> Session State Key
+    table_map = {
+        "nexus_matches": "df_matches",
+        "Premier - PlayerStats": "df_p",
+        "scrims": "df_scrims",
+        "scrim_availability": "df_availability",
+        "player_todos": "df_todos",
+        "nexus_playbooks": "df_team_pb",
+        "playbooks": "df_legacy_pb",
+        "nexus_pb_strats": "df_pb_strats",
+        "nexus_map_theory": "df_theory",
+        "resources": "df_res",
+        "calendar": "df_cal",
+        "todo": "df_simple_todos",
+        "nexus_vod_reviews": "df_vods",
+        "nexus_lineups": "df_lineups"
+    }
 
-    def get_df(name, cols=None):
-        df = all_sheets.get(name)
+    # Check if we need to load data (if any key is missing)
+    missing_keys = [k for k in table_map.values() if k not in st.session_state]
+    
+    if missing_keys:
+        prog_bar = st.progress(0, text="Connecting to Supabase...")
+        total = len(table_map)
+        
+        for i, (tbl, key) in enumerate(table_map.items()):
+            if key not in st.session_state:
+                prog_bar.progress(i / total, text=f"Fetching {tbl}...")
+                try:
+                    response = supabase.table(tbl).select("*").execute()
+                    df = pd.DataFrame(response.data)
+                    if 'id' in df.columns: df.rename(columns={'id': 'ID'}, inplace=True)
+                    st.session_state[key] = df
+                except Exception as e:
+                    st.session_state[key] = pd.DataFrame()
+        
+        prog_bar.empty()
+
+    # Helper to safely get DF from state with columns
+    def get_df_state(key, cols=None):
+        df = st.session_state.get(key, pd.DataFrame())
         if df is None or df.empty:
             return pd.DataFrame(columns=cols if cols else [])
-        
-        # Ensure requested columns exist
         if cols:
             for col in cols:
                 if col not in df.columns: df[col] = None
         return df
 
     # Data Assignment (Same structure as before)
-    df = get_df("nexus_matches", ['Date', 'Map', 'Result', 'Score_Us', 'Score_Enemy', 'MatchID'])
+    df = get_df_state("df_matches", ['Date', 'Map', 'Result', 'Score_Us', 'Score_Enemy', 'MatchID'])
     if not df.empty and 'Date' in df.columns:
         if 'Map' in df.columns: df['Map'] = df['Map'].astype(str).str.strip().str.title()
         if 'Result' in df.columns: df['Result'] = df['Result'].astype(str).str.strip().str.upper()
@@ -1003,33 +1031,33 @@ def load_data(dummy=None):
             if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
         df['Delta'] = df['Score_Us'] - df['Score_Enemy']
     
-    df_p = get_df("Premier - PlayerStats")
-    df_scrims = get_df("scrims", ['ID', 'Title', 'Date', 'Time', 'Map', 'Description', 'CreatedBy', 'CreatedAt', 'PlaybookLink', 'VideoLink'])
+    df_p = get_df_state("df_p")
+    df_scrims = get_df_state("df_scrims", ['ID', 'Title', 'Date', 'Time', 'Map', 'Description', 'CreatedBy', 'CreatedAt', 'PlaybookLink', 'VideoLink'])
     if not df_scrims.empty:
         df_scrims['DateTimeObj'] = pd.to_datetime(df_scrims['Date'] + ' ' + df_scrims['Time'], format="%Y-%m-%d %H:%M", errors='coerce')
     
-    df_availability = get_df("scrim_availability", ['ScrimID', 'Player', 'Available', 'UpdatedAt'])
+    df_availability = get_df_state("df_availability", ['ScrimID', 'Player', 'Available', 'UpdatedAt'])
 
-    df_todos = get_df("player_todos", ['ID', 'Player', 'Title', 'Description', 'PlaybookLink', 'YoutubeLink', 'AssignedBy', 'AssignedAt', 'Completed', 'CompletedAt'])
+    df_todos = get_df_state("df_todos", ['ID', 'Player', 'Title', 'Description', 'PlaybookLink', 'YoutubeLink', 'AssignedBy', 'AssignedAt', 'Completed', 'CompletedAt'])
     if not df_todos.empty and 'Completed' in df_todos.columns:
         df_todos['Completed'] = df_todos['Completed'].astype(str).str.lower() == 'true'
 
-    df_team_pb = get_df("nexus_playbooks", ['ID', 'Map', 'Name', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
-    df_legacy_pb = get_df("playbooks", ['Map', 'Name', 'Link', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
-    df_pb_strats = get_df("nexus_pb_strats", ['PB_ID', 'Strat_ID', 'Name', 'Image', 'Protocols', 'Notes', 'Tag', 'Order'])
+    df_team_pb = get_df_state("df_team_pb", ['ID', 'Map', 'Name', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
+    df_legacy_pb = get_df_state("df_legacy_pb", ['Map', 'Name', 'Link', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
+    df_pb_strats = get_df_state("df_pb_strats", ['PB_ID', 'Strat_ID', 'Name', 'Image', 'Protocols', 'Notes', 'Tag', 'Order'])
     if 'Notes' not in df_pb_strats.columns: df_pb_strats['Notes'] = ""
     if 'Tag' not in df_pb_strats.columns: df_pb_strats['Tag'] = "Default"
     if 'Order' not in df_pb_strats.columns: df_pb_strats['Order'] = range(len(df_pb_strats))
-    df_theory = get_df("nexus_map_theory", ['Map', 'Section', 'Content', 'Image'])
+    df_theory = get_df_state("df_theory", ['Map', 'Section', 'Content', 'Image'])
     
-    df_res = get_df("resources", ['Title', 'Link', 'Category', 'Note'])
-    df_cal = get_df("calendar", ['Date', 'Time', 'Event', 'Map', 'Type', 'Players'])
-    df_simple_todos = get_df("todo", ['Task', 'Done'])
+    df_res = get_df_state("df_res", ['Title', 'Link', 'Category', 'Note'])
+    df_cal = get_df_state("df_cal", ['Date', 'Time', 'Event', 'Map', 'Type', 'Players'])
+    df_simple_todos = get_df_state("df_simple_todos", ['Task', 'Done'])
     if not df_simple_todos.empty and 'Done' in df_simple_todos.columns:
         df_simple_todos['Done'] = df_simple_todos['Done'].astype(str).str.lower() == 'true'
         
-    df_vods = get_df("nexus_vod_reviews", ['ID', 'Title', 'Type', 'VideoLink', 'Map', 'Agent', 'Player', 'Notes', 'Tags', 'CreatedBy', 'CreatedAt', 'Rounds'])
-    df_lineups = get_df("nexus_lineups", ['ID', 'Map', 'Agent', 'Side', 'Type', 'Title', 'Image', 'VideoLink', 'Description', 'Tags', 'CreatedBy'])
+    df_vods = get_df_state("df_vods", ['ID', 'Title', 'Type', 'VideoLink', 'Map', 'Agent', 'Player', 'Notes', 'Tags', 'CreatedBy', 'CreatedAt', 'Rounds'])
+    df_lineups = get_df_state("df_lineups", ['ID', 'Map', 'Agent', 'Side', 'Type', 'Title', 'Image', 'VideoLink', 'Description', 'Tags', 'CreatedBy'])
 
     return df, df_p, df_scrims, df_availability, df_todos, df_team_pb, df_legacy_pb, df_pb_strats, df_theory, df_res, df_cal, df_simple_todos, df_vods, df_lineups
 
@@ -1163,7 +1191,8 @@ with st.sidebar:
     
     # --- RELOAD BUTTON (MIT CACHE CLEAR) ---
     if st.button("🔄 Reload Data (if you created/deleted something)"): 
-        st.cache_data.clear()
+        for k in ["df_matches","df_p","df_scrims","df_availability","df_todos","df_team_pb","df_legacy_pb","df_pb_strats","df_theory","df_res","df_cal","df_simple_todos","df_vods","df_lineups"]:
+            if k in st.session_state: del st.session_state[k]
         st.rerun()
     
     # --- USER INFO & LOGOUT ---
@@ -1699,7 +1728,7 @@ elif page == "👥 COACHING":
                             'CompletedAt': ""
                         }
                         
-                        db_insert("player_todos", new_todo)
+                        db_insert("player_todos", new_todo, "df_todos")
                         
                         # DISCORD NOTIFICATION
                         send_discord_notification(player, title, description)
@@ -1905,7 +1934,7 @@ elif page == "⚽ SCRIMS":
                         # Coach actions
                         if user_role == 'coach':
                             if st.button("🗑️ Delete Scrim", key=f"del_{scrim_id}", use_container_width=True):
-                                db_delete("scrims", scrim_id)
+                                db_delete("scrims", scrim_id, "df_scrims")
                                 # Availability cleanup is handled by DB constraints usually, or we leave orphans for now
                                 st.rerun()
 
@@ -1943,7 +1972,7 @@ elif page == "⚽ SCRIMS":
                         'PlaybookLink': playbook_link if playbook_link != "None" else "",
                         'VideoLink': video_link
                     }
-                    db_insert("scrims", new_scrim)
+                    db_insert("scrims", new_scrim, "df_scrims")
                     
                     # Manual Clear & Redirect
                     for k in ["scrim_title", "scrim_desc", "scrim_vid"]:
@@ -2058,7 +2087,7 @@ elif page == "📝 MATCH ENTRY":
             for i in range(5): row[f'MyComp_{i+1}']=my_final[i]; row[f'EnComp_{i+1}']=en_f[i] if i<len(en_f) else ""
             
             # Save Match (Single Row Insert)
-            db_insert("nexus_matches", row)
+            db_insert("nexus_matches", row, "df_matches")
             
             # Save Player Stats (Bulk Insert for new rows only)
             if d['p_stats']:
@@ -2221,7 +2250,7 @@ elif page == "📘 STRATEGY BOARD":
                             new_row = {'ID': new_id, 'Map': pm, 'Name': pn}
                             for i in range(5): new_row[f'Agent_{i+1}'] = sel_ags[i]
                             
-                            db_insert("nexus_playbooks", new_row)
+                            db_insert("nexus_playbooks", new_row, "df_team_pb")
                             
                             # Manual Clear
                             if "new_pb_name" in st.session_state: del st.session_state["new_pb_name"]
@@ -2769,7 +2798,7 @@ elif page == "📘 STRATEGY BOARD":
                             with open(os.path.join(STRAT_IMG_DIR, fname), "wb") as f: f.write(image_data)
                             new_strat = {'PB_ID': pb['ID'], 'Strat_ID': str(uuid.uuid4()), 'Name': sn, 'Image': fname, 'Protocols': '[]', 'Notes': s_note, 'Tag': s_tag, 'Order': new_order}
                             
-                            db_insert("nexus_pb_strats", new_strat)
+                            db_insert("nexus_pb_strats", new_strat, "df_pb_strats")
                             
                             # Manual Clear
                             for k in ["strat_name", "strat_note"]:
@@ -2797,8 +2826,8 @@ elif page == "📘 STRATEGY BOARD":
                                     prev_order = prev.iloc[0]['Order']
                                     
                                     # Swap in main DF
-                                    db_update("nexus_pb_strats", {'ID': strat['ID'], 'Order': int(prev_order)})
-                                    db_update("nexus_pb_strats", {'ID': prev.iloc[0]['ID'], 'Order': int(current_order)})
+                                    db_update("nexus_pb_strats", {'ID': strat['ID'], 'Order': int(prev_order)}, "df_pb_strats")
+                                    db_update("nexus_pb_strats", {'ID': prev.iloc[0]['ID'], 'Order': int(current_order)}, "df_pb_strats")
                                     st.rerun()
                                     
                             if st.button("⬇️", key=f"dn_{strat['Strat_ID']}"):
@@ -2810,8 +2839,8 @@ elif page == "📘 STRATEGY BOARD":
                                     nxt_order = nxt.iloc[0]['Order']
                                     
                                     # Swap
-                                    db_update("nexus_pb_strats", {'ID': strat['ID'], 'Order': int(nxt_order)})
-                                    db_update("nexus_pb_strats", {'ID': nxt.iloc[0]['ID'], 'Order': int(current_order)})
+                                    db_update("nexus_pb_strats", {'ID': strat['ID'], 'Order': int(nxt_order)}, "df_pb_strats")
+                                    db_update("nexus_pb_strats", {'ID': nxt.iloc[0]['ID'], 'Order': int(current_order)}, "df_pb_strats")
                                     st.rerun()
 
                         with c_content:
@@ -2835,10 +2864,10 @@ elif page == "📘 STRATEGY BOARD":
                                         trig = st.text_input("IF (Trigger)"); react = st.text_input("THEN (Reaction)")
                                         if st.form_submit_button("Add"):
                                             protos.append({'trigger': trig, 'reaction': react})
-                                            db_update("nexus_pb_strats", {'ID': strat['ID'], 'Protocols': json.dumps(protos)})
+                                            db_update("nexus_pb_strats", {'ID': strat['ID'], 'Protocols': json.dumps(protos)}, "df_pb_strats")
                                             st.rerun()
                                     if st.button("Clear Protocols", key=f"clr_{strat['Strat_ID']}"):
-                                        db_update("nexus_pb_strats", {'ID': strat['ID'], 'Protocols': '[]'})
+                                        db_update("nexus_pb_strats", {'ID': strat['ID'], 'Protocols': '[]'}, "df_pb_strats")
                                         st.rerun()
                             st.divider()
 
@@ -3022,7 +3051,7 @@ elif page == "📘 STRATEGY BOARD":
                             'Title': l_title, 'Image': img_name, 'VideoLink': l_vid,
                             'Description': l_desc, 'Tags': "", 'CreatedBy': st.session_state.get('username', 'Unknown')
                         }
-                        db_insert("nexus_lineups", new_lu)
+                        db_insert("nexus_lineups", new_lu, "df_lineups")
                         st.success("Lineup saved!")
                         
                         # Manual Clear
@@ -3059,7 +3088,7 @@ elif page == "📘 STRATEGY BOARD":
                         if row['Description']: st.info(row['Description'])
                         
                         if st.button("🗑️", key=f"del_lu_{row['ID']}"):
-                            db_delete("nexus_lineups", row['ID'])
+                            db_delete("nexus_lineups", row['ID'], "df_lineups")
                             st.rerun()
         else:
             st.info("No lineups found.")
@@ -3092,7 +3121,7 @@ elif page == "📘 STRATEGY BOARD":
                         nr = {'Map': pm, 'Name': pn, 'Link': pl}
                         for i in range(5): nr[f'Agent_{i+1}'] = mas[i]
                         
-                        db_insert("playbooks", nr)
+                        db_insert("playbooks", nr, "df_legacy_pb")
                         st.success("Link saved!")
                         
                         # Manual Clear
@@ -3157,7 +3186,7 @@ elif page == "📘 STRATEGY BOARD":
                         with c_action:
                             st.link_button("🔗 OPEN", row['Link'], use_container_width=True)
                             if st.button("🗑️", key=f"del_link_{idx}"):
-                                db_delete("playbooks", row['ID'])
+                                db_delete("playbooks", row['ID'], "df_legacy_pb")
                                 st.rerun()
                         
                         st.markdown("---")
@@ -3175,7 +3204,7 @@ elif page == "📚 RESOURCES":
         with st.form("ra"):
             rt = st.text_input("Title", key="res_title"); rl = st.text_input("Link", key="res_link"); rc = st.selectbox("Cat", ["Theory", "Lineups", "Setup", "Playbook Theory"], key="res_cat"); rn = st.text_area("Note", key="res_note")
             if st.form_submit_button("Save"):
-                db_insert("resources", {'Title': rt, 'Link': rl, 'Category': rc, 'Note': rn})
+                db_insert("resources", {'Title': rt, 'Link': rl, 'Category': rc, 'Note': rn}, "df_res")
                 # Manual Clear
                 for k in ["res_title", "res_link", "res_note"]:
                     if k in st.session_state: del st.session_state[k]
@@ -3275,7 +3304,7 @@ elif page == "📅 CALENDAR":
                 
                 if st.form_submit_button("Add"):
                     p_str = ", ".join(cp)
-                    db_insert("calendar", {'Date':cd.strftime("%d.%m.%Y"),'Time':ct.strftime("%H:%M"),'Event':ce,'Map':cm,'Type':cty,'Players':p_str})
+                    db_insert("calendar", {'Date':cd.strftime("%d.%m.%Y"),'Time':ct.strftime("%H:%M"),'Event':ce,'Map':cm,'Type':cty,'Players':p_str}, "df_cal")
                     # Manual Clear
                     for k in ["cal_name", "cal_map", "cal_players"]:
                         if k in st.session_state: del st.session_state[k]
@@ -4225,9 +4254,9 @@ elif page == "📹 VOD REVIEW":
                     }
                     
                     if is_new:
-                        db_insert("nexus_vod_reviews", save_data)
+                        db_insert("nexus_vod_reviews", save_data, "df_vods")
                     else:
-                        db_update("nexus_vod_reviews", save_data)
+                        db_update("nexus_vod_reviews", save_data, "df_vods")
                     
                     st.success("Saved!")
                     if is_new:
@@ -4347,13 +4376,13 @@ elif page == "📹 VOD REVIEW":
                                 'Description': f"Exported from VOD: {row['Title']}", 'Tags': "VOD Export", 
                                 'CreatedBy': current_user
                             }
-                            db_insert("nexus_lineups", new_lu)
+                            db_insert("nexus_lineups", new_lu, "df_lineups")
                             st.success(f"Exported to Lineup Library!")
 
         # Delete Button (Bottom)
         if not is_new:
             if st.button("🗑️ Delete Review", key="del_wk"):
-                db_delete("nexus_vod_reviews", row['ID'])
+                db_delete("nexus_vod_reviews", row['ID'], "df_vods")
                 st.session_state.active_vod_id = None
                 st.rerun()
 
