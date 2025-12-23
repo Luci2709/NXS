@@ -1,11 +1,11 @@
 streamlit
 pandas
 plotly
-requests
-st-gsheets-connection
-numpy
+supabase
 Pillow
+requests
+numpy
+streamlit-drawable-canvas
+st-img-pastebutton
 python-pptx
 fpdf
-st-img-pastebutton
-streamlit-drawable-canvas

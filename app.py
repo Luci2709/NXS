@@ -50,10 +50,13 @@ from PIL import Image
 
 # --- SUPABASE CONNECTION SETUP ---
 # Initialisierung der Verbindung
+# --- SUPABASE CONNECTION SETUP ---
 @st.cache_resource
 def init_supabase():
-    url = st.secrets["https://xfecjmxbfnrnackkvblp.supabase.co"]
-    key = st.secrets["sb_publishable_TVm9kcyTFVPKQ3W4Nm3vgw_Y4SfGQKz"]
+    # Hier holt sich Streamlit die echten Daten aus deiner secrets.toml
+    url = st.secrets["SUPABASE_URL"] 
+    key = st.secrets["SUPABASE_KEY"]
+    
     return create_client(url, key)
 
 supabase = init_supabase()
