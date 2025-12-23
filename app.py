@@ -4079,8 +4079,6 @@ elif page == "📹 VOD REVIEW":
                 pasted_img_code = f"\n[[img:{fn}]]\n"
                 st.session_state['last_pasted_vod_img'] = fn # Save reference for export
 
-            notes_val = st.text_area("Notes", value=st.session_state.wk_notes_temp, height=400, key="wk_notes_area")
-            st.session_state.wk_notes_temp = notes_val # Sync back
             if mode == "📝 General Notes":
                 if 'wk_notes_temp' not in st.session_state: st.session_state.wk_notes_temp = row['Notes']
                 
@@ -4093,6 +4091,7 @@ elif page == "📹 VOD REVIEW":
                 st.session_state.wk_notes_temp = notes_val
             
             else: # ROUND BY ROUND
+                notes_val = st.session_state.wk_notes_temp
                 if 'wk_rounds_temp' not in st.session_state: st.session_state.wk_rounds_temp = rounds_data
                 curr_rounds = st.session_state.wk_rounds_temp
                 
