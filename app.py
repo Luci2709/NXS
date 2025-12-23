@@ -3234,19 +3234,14 @@ elif page == "📅 CALENDAR":
                         st.markdown(h+"</div>", unsafe_allow_html=True)
         
         with st.expander("Add Event"):
-            with st.form("ca", clear_on_submit=True):
             with st.form("ca"):
                 c_d, c_t = st.columns(2)
-                cd=c_d.date_input("Date"); ct=c_t.time_input("Time")
-                ce=st.text_input("Event Name"); 
                 cd=c_d.date_input("Date", key="cal_date"); ct=c_t.time_input("Time", key="cal_time")
                 ce=st.text_input("Event Name", key="cal_name"); 
                 c_m, c_ty = st.columns(2)
-                cm=c_m.text_input("Map (Optional)"); cty=c_ty.selectbox("Type",["Match","Scrim","Other"])
                 cm=c_m.text_input("Map (Optional)", key="cal_map"); cty=c_ty.selectbox("Type",["Match","Scrim","Other"], key="cal_type")
                 
                 # Player Selector
-                cp = st.multiselect("Assign Players", ["Luggi","Benni","Andrei","Luca","Sofi","Remus"], default=[])
                 cp = st.multiselect("Assign Players", ["Luggi","Benni","Andrei","Luca","Sofi","Remus"], default=[], key="cal_players")
                 
                 if st.form_submit_button("Add"):
@@ -4348,7 +4343,5 @@ elif page == "💾 DATABASE":
     st.header("Database")
     ed = st.data_editor(df, num_rows="dynamic")
     if st.button("Save"): 
-        save_matches(ed)
-        st.success("Saved to Google Sheets")
         save_matches(ed)
         st.success("Saved to Google Sheets")
