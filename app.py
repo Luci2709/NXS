@@ -35,6 +35,7 @@ except ImportError as e:
     CLIPBOARD_ERR = str(e)
 import random
 import threading
+import re
 
 # ==============================================================================
 # 🔧 ROBUST MONKEY PATCH (Fix für Component Error & Streamlit 1.40+)
@@ -144,11 +145,11 @@ def get_allowed_pages(role):
     if role == "visitor":
         return ["🏠 DASHBOARD"]
     elif role == "player":
-        return ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS"]
+        return ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "📹 VOD REVIEW"]
     elif role == "coach":
-        return ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "📝 MATCH ENTRY", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "💾 DATABASE"]
+        return ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "📝 MATCH ENTRY", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "📹 VOD REVIEW", "💾 DATABASE"]
     elif role == "testing":
-        return ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "📝 MATCH ENTRY", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "💾 DATABASE"]
+        return ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "📝 MATCH ENTRY", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "📹 VOD REVIEW", "💾 DATABASE"]
     return []
 
 def login_page():
@@ -640,12 +641,13 @@ DATA_DIR_JSON = os.path.join(BASE_DIR, "data", "matches")
 # Die Pfade zu lokalen CSVs werden hier eigentlich nicht mehr gebraucht, außer als Referenz oder für Heatmap JSONs
 ASSET_DIR = os.path.join(BASE_DIR, "assets")
 STRAT_IMG_DIR = os.path.join(ASSET_DIR, "strats")
+VOD_IMG_DIR = os.path.join(ASSET_DIR, "vod_imgs")
 PLAYBOOKS_FILE = os.path.join(BASE_DIR, "data", "playbooks.csv")
 TEAM_PLAYBOOKS_FILE = os.path.join(BASE_DIR, "data", "nexus_playbooks.csv")
 PRESETS_FILE = os.path.join(BASE_DIR, "data", "pdf_presets.json")
 
 # Verzeichnisse erstellen
-for d in [DATA_DIR_JSON, os.path.join(BASE_DIR, "data"), STRAT_IMG_DIR, os.path.join(ASSET_DIR, "maps"), os.path.join(ASSET_DIR, "agents"), os.path.join(ASSET_DIR, "fonts"), os.path.join(ASSET_DIR, "playbook")]:
+for d in [DATA_DIR_JSON, os.path.join(BASE_DIR, "data"), STRAT_IMG_DIR, VOD_IMG_DIR, os.path.join(ASSET_DIR, "maps"), os.path.join(ASSET_DIR, "agents"), os.path.join(ASSET_DIR, "fonts"), os.path.join(ASSET_DIR, "playbook")]:
     if not os.path.exists(d): os.makedirs(d)
 
 OUR_TEAM = ["Trashies", "Luggi", "Umbra", "Noctis", "n0thing", "Gengar"]
@@ -765,6 +767,17 @@ def img_to_b64(img_path):
     if not img_path or not os.path.exists(img_path): return ""
     with open(img_path, "rb") as f: data = f.read()
     return base64.b64encode(data).decode()
+
+def render_rich_notes(text):
+    """Renders text with embedded images [[img:filename]]"""
+    if not text: return
+    def _repl(m):
+        fp = os.path.join(VOD_IMG_DIR, m.group(1))
+        if os.path.exists(fp):
+            return f'<img src="data:image/png;base64,{img_to_b64(fp)}" style="max-width:100%;border:1px solid #444;border-radius:4px;margin:5px 0">'
+        return f"`[Image: {m.group(1)} not found]`"
+    processed = re.sub(r"\[\[img:(.*?)\]\]", _repl, text)
+    st.markdown(processed, unsafe_allow_html=True)
 
 def get_yt_thumbnail(url):
     if not url or "youtu" not in str(url): return None
@@ -928,6 +941,9 @@ def save_team_playbooks(df_new):
 
 def save_simple_todos(df_new):
     threading.Thread(target=_bg_save, args=("todo", df_new)).start()
+
+def save_vod_reviews(df_new):
+    threading.Thread(target=_bg_save, args=("nexus_vod_reviews", df_new)).start()
 
 def update_availability(scrim_id, player, status):
     def _task():
@@ -1139,7 +1155,7 @@ def load_data(dummy=None):
     all_worksheet_names = [
         "nexus_matches", "Premier - PlayerStats", "scrims", "scrim_availability",
         "player_todos", "nexus_playbooks", "playbooks",
-        "nexus_pb_strats", "nexus_map_theory", "resources", "calendar", "todo"
+        "nexus_pb_strats", "nexus_map_theory", "resources", "calendar", "todo", "nexus_vod_reviews"
     ]
     
     all_sheets = {}
@@ -1213,8 +1229,11 @@ def load_data(dummy=None):
     df_simple_todos = get_df("todo", ['Task', 'Done'])
     if not df_simple_todos.empty and 'Done' in df_simple_todos.columns:
         df_simple_todos['Done'] = df_simple_todos['Done'].astype(str).str.lower() == 'true'
+        
+    # Block 6: VOD Reviews
+    df_vods = get_df("nexus_vod_reviews", ['ID', 'Title', 'Type', 'VideoLink', 'Map', 'Agent', 'Player', 'Notes', 'Tags', 'CreatedBy', 'CreatedAt'])
 
-    return df, df_p, df_scrims, df_availability, df_todos, df_team_pb, df_legacy_pb, df_pb_strats, df_theory, df_res, df_cal, df_simple_todos
+    return df, df_p, df_scrims, df_availability, df_todos, df_team_pb, df_legacy_pb, df_pb_strats, df_theory, df_res, df_cal, df_simple_todos, df_vods
 
 # ==============================================================================
 # 🚀 APP START & DATEN LADEN
@@ -1245,7 +1264,7 @@ LOADING_QUOTES = [
 ]
 
 with st.spinner(random.choice(LOADING_QUOTES)):
-    df, df_players, df_scrims, df_availability, df_todos, df_team_pb, df_legacy_pb, df_pb_strats, df_theory, df_res, df_cal, df_simple_todos = load_data()
+    df, df_players, df_scrims, df_availability, df_todos, df_team_pb, df_legacy_pb, df_pb_strats, df_theory, df_res, df_cal, df_simple_todos, df_vods = load_data()
 
 # Handle navigation triggers
 if "trigger_navigation" in st.session_state:
@@ -1257,7 +1276,7 @@ with st.sidebar:
     st.title("NEXUS")
     
     # --- NAVIGATION LOGIK ---
-    all_pages = ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "📝 MATCH ENTRY", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "💾 DATABASE"]
+    all_pages = ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "📝 MATCH ENTRY", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "📹 VOD REVIEW", "💾 DATABASE"]
     
     # Hole die erlaubten Seiten aus dem Session State (gesetzt beim Login)
     # Fallback auf alle Seiten, falls Session State leer ist
@@ -2592,192 +2611,207 @@ elif page == "📘 STRATEGY BOARD":
 
                     def generate_pdf_report(playbook_data, strats_data, bg_image=None, layout=None):
                         from fpdf import FPDF
-                        # ⚙️ PDF SETTINGS (RESOLUTION / FORMAT)
-                        # 16:9 Aspect Ratio (Standard PPT Widescreen: 338.7mm x 190.5mm)
-                        # This matches the 1920x1080 aspect ratio requested.
-                        pdf = FPDF(orientation='L', unit='mm', format=(190.5, 338.7))
-                        pdf.set_auto_page_break(auto=True, margin=15)
                         
-                        # Default Layout if None
-                        if layout is None:
-                            layout = default_layout.copy()
+                        def _create_pdf(enable_custom_fonts):
+                            # ⚙️ PDF SETTINGS (RESOLUTION / FORMAT)
+                            # 16:9 Aspect Ratio (Standard PPT Widescreen: 338.7mm x 190.5mm)
+                            pdf = FPDF(orientation='L', unit='mm', format=(190.5, 338.7))
+                            pdf.set_auto_page_break(auto=True, margin=15)
+                            
+                            # Default Layout if None
+                            local_layout = layout if layout is not None else default_layout.copy()
 
-                        def hex_to_rgb(hex_col):
-                            hex_col = hex_col.lstrip('#')
-                            return tuple(int(hex_col[i:i+2], 16) for i in (0, 2, 4))
+                            def hex_to_rgb(hex_col):
+                                hex_col = hex_col.lstrip('#')
+                                return tuple(int(hex_col[i:i+2], 16) for i in (0, 2, 4))
 
-                        # --- FONTS ---
-                        # Try to register Nunito if available in assets/fonts
-                        font_family = "Arial"
-                        try:
-                            font_dir = os.path.join(ASSET_DIR, "fonts")
-                            if os.path.exists(os.path.join(font_dir, "Nunito-Regular.ttf")):
-                                pdf.add_font("Nunito", "", os.path.join(font_dir, "Nunito-Regular.ttf"), uni=True)
-                                pdf.add_font("Nunito", "B", os.path.join(font_dir, "Nunito-Bold.ttf"), uni=True)
-                                font_family = "Nunito"
-                        except Exception as e:
-                            print(f"Font loading error: {e}")
+                            # --- FONTS ---
+                            font_family = "Arial"
+                            if enable_custom_fonts:
+                                try:
+                                    font_dir = os.path.join(ASSET_DIR, "fonts")
+                                    regular_font = os.path.join(font_dir, "Nunito-Regular.ttf")
+                                    bold_font = os.path.join(font_dir, "Nunito-Bold.ttf")
+                                    if os.path.exists(regular_font) and os.path.exists(bold_font):
+                                        pdf.add_font("Nunito", "", regular_font, uni=True)
+                                        pdf.add_font("Nunito", "B", bold_font, uni=True)
+                                        font_family = "Nunito"
+                                except Exception as e:
+                                    print(f"Font loading error: {e}")
 
-                        # Handle Background Image (Save to temp file if uploaded)
-                        bg_path = None
-                        if bg_image:
-                            bg_path = "temp_pdf_bg.png"
-                            with open(bg_path, "wb") as f:
-                                f.write(bg_image.getbuffer())
-                        
-                        # --- TITLE PAGE ---
-                        pdf.add_page()
-                        pdf.set_fill_color(10, 10, 20) # Dark BG
-                        pdf.rect(0, 0, pdf.w, pdf.h, 'F')
-                        
-                        # Title Slide ALWAYS uses Map Background (Dimmed) as requested
-                        # Check assets/playbook/[map].png first
-                        map_clean = str(playbook_data['Map']).lower().strip()
-                        playbook_bg = os.path.join(ASSET_DIR, "playbook", f"{map_clean}.png")
-                        
-                        if os.path.exists(playbook_bg):
-                            map_path = playbook_bg
-                        else:
-                            map_path = get_map_img(playbook_data['Map'], 'list')
-
-                        if map_path:
-                            try:
-                                # 🛠️ DIMMING LOGIC (30% reduced brightness)
-                                with Image.open(map_path) as img:
-                                    enhancer = ImageEnhance.Brightness(img)
-                                    dimmed_img = enhancer.enhance(0.7) # 0.7 = 70% brightness (30% reduced)
-                                    
-                                    temp_map_bg = "temp_map_bg_pdf.png"
-                                    dimmed_img.save(temp_map_bg)
-                                    
-                                    # Position: x=0, y=0 (Top Left), w=Page Width, h=Page Height
-                                    pdf.image(temp_map_bg, x=0, y=0, w=pdf.w, h=pdf.h)
-                            except Exception as e:
-                                print(f"PDF BG Error: {e}")
-                                # Fallback if dimming fails
-                                pdf.image(map_path, x=0, y=0, w=pdf.w, h=pdf.h)
-                        
-                        # Title
-                        pdf.set_y(80) # Move title down to 80mm from top
-                        pdf.set_font(font_family, "B", 50)
-                        pdf.set_text_color(255, 255, 255)
-                        pdf.cell(0, 20, txt=playbook_data['Name'], ln=True, align='C')
-                        
-                        pdf.ln(5) # Add 5mm vertical space
-                        pdf.set_font(font_family, "B", 24)
-                        pdf.set_text_color(0, 191, 255) # Cyan
-                        pdf.cell(0, 10, txt=playbook_data['Map'].upper(), ln=True, align='C')
-                        
-                        # Agents
-                        agents = [playbook_data.get(f'Agent_{i}') for i in range(1,6)]
-                        comp_img = create_team_composite(agents)
-                        if comp_img:
-                            # Save temp to include in PDF
-                            with open("temp_comp.png", "wb") as f: f.write(comp_img.getbuffer())
-                            pdf.image("temp_comp.png", x=(pdf.w-150)/2, y=140, w=150)
-                        
-                        # --- STRAT PAGES ---
-                        for _, strat in strats_data.iterrows():
+                            # Handle Background Image (Save to temp file if uploaded)
+                            bg_path = None
+                            if bg_image:
+                                bg_path = "temp_pdf_bg.png"
+                                with open(bg_path, "wb") as f:
+                                    f.write(bg_image.getbuffer())
+                            
+                            # --- TITLE PAGE ---
                             pdf.add_page()
-                            pdf.set_fill_color(240, 240, 240)
+                            pdf.set_fill_color(10, 10, 20) # Dark BG
                             pdf.rect(0, 0, pdf.w, pdf.h, 'F')
                             
-                            # Apply Custom Background to strat pages too if provided
-                            if bg_path:
-                                pdf.image(bg_path, x=0, y=0, w=pdf.w, h=pdf.h)
+                            # Title Slide ALWAYS uses Map Background (Dimmed) as requested
+                            # Check assets/playbook/[map].png first
+                            map_clean = str(playbook_data['Map']).lower().strip()
+                            playbook_bg = os.path.join(ASSET_DIR, "playbook", f"{map_clean}.png")
                             
-                            # Logo
-                            if os.path.exists("logo.png"):
+                            if os.path.exists(playbook_bg):
+                                map_path = playbook_bg
+                            else:
+                                map_path = get_map_img(playbook_data['Map'], 'list')
+
+                            if map_path:
                                 try:
-                                    with Image.open("logo.png") as l_img:
-                                        enh = ImageEnhance.Brightness(l_img)
-                                        l_dim = enh.enhance(0.6) # 40% reduced brightness
-                                        l_dim.save("temp_logo_dim.png")
-                                    pdf.image("temp_logo_dim.png", x=layout.get('logo_x', 10), y=layout.get('logo_y', 10), w=layout.get('logo_w', 20))
-                                except: pass
+                                    # 🛠️ DIMMING LOGIC (30% reduced brightness)
+                                    with Image.open(map_path) as img:
+                                        enhancer = ImageEnhance.Brightness(img)
+                                        dimmed_img = enhancer.enhance(0.7) # 0.7 = 70% brightness (30% reduced)
+                                        
+                                        temp_map_bg = "temp_map_bg_pdf.png"
+                                        dimmed_img.save(temp_map_bg)
+                                        
+                                        # Position: x=0, y=0 (Top Left), w=Page Width, h=Page Height
+                                        pdf.image(temp_map_bg, x=0, y=0, w=pdf.w, h=pdf.h)
+                                except Exception as e:
+                                    print(f"PDF BG Error: {e}")
+                                    # Fallback if dimming fails
+                                    pdf.image(map_path, x=0, y=0, w=pdf.w, h=pdf.h)
                             
-                            # Header
-                            pdf.set_xy(layout['title_x'], layout['title_y'])
-                            pdf.set_font(font_family, "B", layout.get('title_size', 24))
+                            # Title
+                            pdf.set_y(80) # Move title down to 80mm from top
+                            pdf.set_font(font_family, "B", 50)
+                            pdf.set_text_color(255, 255, 255)
+                            pdf.cell(0, 20, txt=playbook_data['Name'], ln=True, align='C')
                             
-                            # Title Color
-                            tr, tg, tb = hex_to_rgb(layout.get('title_color', '#FFFFFF'))
-                            pdf.set_text_color(tr, tg, tb)
+                            pdf.ln(5) # Add 5mm vertical space
+                            pdf.set_font(font_family, "B", 24)
+                            pdf.set_text_color(0, 191, 255) # Cyan
+                            pdf.cell(0, 10, txt=playbook_data['Map'].upper(), ln=True, align='C')
                             
-                            pdf.cell(0, 20, txt=strat['Name'], ln=True)
+                            # Agents
+                            agents = [playbook_data.get(f'Agent_{i}') for i in range(1,6)]
+                            comp_img = create_team_composite(agents)
+                            if comp_img:
+                                # Save temp to include in PDF
+                                with open("temp_comp.png", "wb") as f: f.write(comp_img.getbuffer())
+                                pdf.image("temp_comp.png", x=(pdf.w-150)/2, y=140, w=150)
                             
-                            # Tag (Below Title)
-                            if pd.notna(strat.get('Tag')) and strat['Tag']:
-                                pdf.set_xy(layout['title_x'], layout['title_y'] + 12)
-                                pdf.set_font(font_family, "I", layout.get('title_size', 24) * 0.6) # Smaller font for tag
+                            # --- STRAT PAGES ---
+                            for _, strat in strats_data.iterrows():
+                                pdf.add_page()
+                                pdf.set_fill_color(240, 240, 240)
+                                pdf.rect(0, 0, pdf.w, pdf.h, 'F')
                                 
-                                # Tag Color
-                                tr, tg, tb = hex_to_rgb(layout.get('tag_color', '#00BFFF'))
+                                # Apply Custom Background to strat pages too if provided
+                                if bg_path:
+                                    pdf.image(bg_path, x=0, y=0, w=pdf.w, h=pdf.h)
+                                
+                                # Logo
+                                if os.path.exists("logo.png"):
+                                    try:
+                                        with Image.open("logo.png") as l_img:
+                                            enh = ImageEnhance.Brightness(l_img)
+                                            l_dim = enh.enhance(0.6) # 40% reduced brightness
+                                            l_dim.save("temp_logo_dim.png")
+                                        pdf.image("temp_logo_dim.png", x=local_layout.get('logo_x', 10), y=local_layout.get('logo_y', 10), w=local_layout.get('logo_w', 20))
+                                    except: pass
+                                
+                                # Header
+                                pdf.set_xy(local_layout['title_x'], local_layout['title_y'])
+                                pdf.set_font(font_family, "B", local_layout.get('title_size', 24))
+                                
+                                # Title Color
+                                tr, tg, tb = hex_to_rgb(local_layout.get('title_color', '#FFFFFF'))
                                 pdf.set_text_color(tr, tg, tb)
                                 
-                                pdf.cell(0, 10, txt=f"{strat['Tag']}", ln=True)
-                            
-                            # Image
-                            img_path = os.path.join(STRAT_IMG_DIR, strat['Image'])
-                            if os.path.exists(img_path):
-                                # Scale preserving aspect ratio (Fit within box)
-                                try:
-                                    with Image.open(img_path) as img_pil:
-                                        orig_w, orig_h = img_pil.size
+                                pdf.cell(0, 20, txt=strat['Name'], ln=True)
+                                
+                                # Tag (Below Title)
+                                if pd.notna(strat.get('Tag')) and strat['Tag']:
+                                    pdf.set_xy(local_layout['title_x'], local_layout['title_y'] + 12)
+                                    pdf.set_font(font_family, "I", local_layout.get('title_size', 24) * 0.6) # Smaller font for tag
                                     
-                                    box_w = layout.get('img_w', 210)
-                                    box_h = layout['img_h']
-                                    scale = min(box_w/orig_w, box_h/orig_h)
-                                    new_w, new_h = orig_w * scale, orig_h * scale
+                                    # Tag Color
+                                    tr, tg, tb = hex_to_rgb(local_layout.get('tag_color', '#00BFFF'))
+                                    pdf.set_text_color(tr, tg, tb)
                                     
-                                    # Bottom Right Alignment in Box
-                                    # X = layout['img_x'] + box_w - new_w (Right)
-                                    # Y = layout['img_y'] + box_h - new_h (Bottom)
-                                    pdf.image(img_path, x=layout['img_x'] + box_w - new_w, y=layout['img_y'] + box_h - new_h, w=new_w, h=new_h)
-                                except:
-                                    pdf.image(img_path, x=layout['img_x'], y=layout['img_y'], w=layout.get('img_w', 210), h=layout['img_h'])
-                            
-                            # Protocols
-                            pdf.set_xy(layout['proto_x'], layout['proto_y'])
-                            pdf.set_font(font_family, "B", layout.get('proto_size', 12) + 4) # Header slightly larger
-                            # Header Color (Use Title Color or separate?) Let's use Title Color for consistency or IF color
-                            tr, tg, tb = hex_to_rgb(layout.get('title_color', '#FFFFFF'))
-                            pdf.set_text_color(tr, tg, tb)
-                            pdf.cell(100, 10, txt="PROTOCOLS", ln=True)
-                            
-                            try: protos = json.loads(strat['Protocols'])
-                            except: protos = []
-                            
-                            if_rgb = hex_to_rgb(layout.get('if_color', '#00BFFF'))
-                            then_rgb = hex_to_rgb(layout.get('then_color', '#FFFFFF'))
-                            
-                            for p in protos:
-                                pdf.set_x(layout['proto_x'])
-                                # IF (Bold + Color)
-                                pdf.set_font(font_family, "B", layout.get('proto_size', 12))
-                                pdf.set_text_color(*if_rgb)
-                                pdf.multi_cell(100, 6, txt=f"IF: {p['trigger']}", border=0)
+                                    pdf.cell(0, 10, txt=f"{strat['Tag']}", ln=True)
                                 
-                                # THEN (Normal + Color)
-                                pdf.set_x(layout['proto_x'])
-                                pdf.set_font(font_family, "", layout.get('proto_size', 12))
-                                pdf.set_text_color(*then_rgb)
-                                pdf.multi_cell(100, 6, txt=f"-> {p['reaction']}", border=0)
+                                # Image
+                                img_path = os.path.join(STRAT_IMG_DIR, strat['Image'])
+                                if os.path.exists(img_path):
+                                    # Scale preserving aspect ratio (Fit within box)
+                                    try:
+                                        with Image.open(img_path) as img_pil:
+                                            orig_w, orig_h = img_pil.size
+                                        
+                                        box_w = local_layout.get('img_w', 210)
+                                        box_h = local_layout['img_h']
+                                        scale = min(box_w/orig_w, box_h/orig_h)
+                                        new_w, new_h = orig_w * scale, orig_h * scale
+                                        
+                                        # Bottom Right Alignment in Box
+                                        # X = local_layout['img_x'] + box_w - new_w (Right)
+                                        # Y = local_layout['img_y'] + box_h - new_h (Bottom)
+                                        pdf.image(img_path, x=local_layout['img_x'] + box_w - new_w, y=local_layout['img_y'] + box_h - new_h, w=new_w, h=new_h)
+                                    except:
+                                        pdf.image(img_path, x=local_layout['img_x'], y=local_layout['img_y'], w=local_layout.get('img_w', 210), h=local_layout['img_h'])
                                 
-                                pdf.ln(3)
+                                # Protocols
+                                pdf.set_xy(local_layout['proto_x'], local_layout['proto_y'])
+                                pdf.set_font(font_family, "B", local_layout.get('proto_size', 12) + 4) # Header slightly larger
+                                # Header Color (Use Title Color or separate?) Let's use Title Color for consistency or IF color
+                                tr, tg, tb = hex_to_rgb(local_layout.get('title_color', '#FFFFFF'))
+                                pdf.set_text_color(tr, tg, tb)
+                                pdf.cell(100, 10, txt="PROTOCOLS", ln=True)
+                                
+                                try: protos = json.loads(strat['Protocols'])
+                                except: protos = []
+                                
+                                if_rgb = hex_to_rgb(local_layout.get('if_color', '#00BFFF'))
+                                then_rgb = hex_to_rgb(local_layout.get('then_color', '#FFFFFF'))
+                                
+                                for p in protos:
+                                    pdf.set_x(local_layout['proto_x'])
+                                    # IF (Bold + Color)
+                                    pdf.set_font(font_family, "B", local_layout.get('proto_size', 12))
+                                    pdf.set_text_color(*if_rgb)
+                                    pdf.multi_cell(100, 6, txt=f"IF: {p['trigger']}", border=0)
+                                    
+                                    # THEN (Normal + Color)
+                                    pdf.set_x(local_layout['proto_x'])
+                                    pdf.set_font(font_family, "", local_layout.get('proto_size', 12))
+                                    pdf.set_text_color(*then_rgb)
+                                    pdf.multi_cell(100, 6, txt=f"-> {p['reaction']}", border=0)
+                                    
+                                    pdf.ln(3)
+                                
+                                # Notes
+                                if pd.notna(strat.get('Notes')) and strat['Notes']:
+                                    pdf.set_xy(local_layout['note_x'], local_layout['note_y'])
+                                    
+                                    # Note Color
+                                    nr, ng, nb = hex_to_rgb(local_layout.get('note_color', '#FFFFFF'))
+                                    pdf.set_text_color(nr, ng, nb)
+                                    
+                                    pdf.set_font(font_family, "", 12)
+                                    pdf.multi_cell(local_layout.get('note_w', 0), 6, txt=strat['Notes'])
                             
-                            # Notes
-                            if pd.notna(strat.get('Notes')) and strat['Notes']:
-                                pdf.set_xy(layout['note_x'], layout['note_y'])
-                                
-                                # Note Color
-                                nr, ng, nb = hex_to_rgb(layout.get('note_color', '#FFFFFF'))
-                                pdf.set_text_color(nr, ng, nb)
-                                
-                                pdf.set_font(font_family, "", 12)
-                                pdf.multi_cell(layout.get('note_w', 0), 6, txt=strat['Notes'])
+                            return pdf
 
-                        return pdf.output(dest='S').encode('latin-1')
+                        try:
+                            # Try with custom fonts first
+                            pdf = _create_pdf(enable_custom_fonts=True)
+                            return pdf.output(dest='S').encode('latin-1')
+                        except Exception as e:
+                            print(f"PDF Generation Error (Custom Fonts): {e}")
+                            # Fallback: No custom fonts (Arial)
+                            try:
+                                pdf = _create_pdf(enable_custom_fonts=False)
+                                return pdf.output(dest='S').encode('latin-1')
+                            except Exception as e2:
+                                return f"Error generating PDF: {str(e2)}".encode('utf-8')
                     
                     with c_pdf:
                         st.download_button(
@@ -3884,6 +3918,251 @@ elif page == "📊 PLAYERS":
         
         else:
             st.info("👆 Bitte lade eine JSON-Datei hoch (Tracker.gg Match-Export oder Profil-Export), um die Analyse zu starten.")
+
+# ==============================================================================
+# 📹 VOD REVIEW
+# ==============================================================================
+elif page == "📹 VOD REVIEW":
+    st.title("📹 VOD REVIEW & ANALYSIS")
+    
+    # Current User
+    current_user = st.session_state.get('username', 'Unknown')
+    
+    tab_new, tab_lib = st.tabs(["➕ NEW REVIEW", "📂 REVIEW LIBRARY"])
+    
+    with tab_new:
+        st.markdown("### 📝 Create New Analysis")
+        st.caption("Watch a VOD and take notes simultaneously. Supports YouTube, Twitch, and direct video links.")
+        
+        # Session State for Notes (to allow appending images)
+        if 'new_vod_notes' not in st.session_state: st.session_state.new_vod_notes = ""
+
+        # 1. Video Link (Outside Form for interactivity)
+        v_link = st.text_input("Video Link (Paste here to load video)", placeholder="https://www.youtube.com/watch?v=...", key="vod_link_input")
+
+        # 2. Paste Button (Outside Form)
+        if HAS_CLIPBOARD:
+            pasted_data = paste(label="📋 Paste Screenshot to Notes", key="new_vod_paste")
+            if pasted_data:
+                try:
+                    if isinstance(pasted_data, str) and "," in pasted_data: pasted_data = pasted_data.split(",")[1]
+                    img_bytes = base64.b64decode(pasted_data)
+                    fname = f"VOD_SNAP_{uuid.uuid4().hex[:8]}.png"
+                    with open(os.path.join(VOD_IMG_DIR, fname), "wb") as f: f.write(img_bytes)
+                    st.session_state.new_vod_notes += f"\n[[img:{fname}]]\n"
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Paste Error: {e}")
+
+        # 3. Form for Data Entry & Saving
+        with st.form("new_vod_form"):
+            c1, c2 = st.columns(2)
+            with c1:
+                v_title = st.text_input("Title", placeholder="e.g. FNATIC vs LOUD - Lotus Analysis")
+                v_type = st.selectbox("Type", ["Own Gameplay", "Pro Match", "Scrim Review", "Other"])
+            with c2:
+                v_map = st.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"])
+                c_sub1, c_sub2 = st.columns(2)
+                p_opts = ["None"] + ["Luggi","Benni","Andrei","Luca","Sofi","Remus"]
+                v_player = c_sub1.selectbox("Player", p_opts)
+                a_opts = ["None"] + sorted(df_players['Agent'].unique().tolist()) if not df_players.empty else ["None"]
+                v_agent = c_sub2.selectbox("Agent", a_opts)
+
+            st.markdown("---")
+            c_vid, c_note = st.columns([1.6, 1])
+            
+            with c_vid:
+                if v_link: st.video(v_link)
+                else: st.info("📺 Enter a Video Link above to watch here.")
+            
+            with c_note:
+                st.markdown("### 📝 Notes")
+                v_notes = st.text_area("Content", value=st.session_state.new_vod_notes, height=400, key="form_vod_notes")
+                v_tags = st.multiselect("Tags", ["Macro", "Micro", "Comms", "Utility", "Clutch", "Entry", "Retake", "Setup", "IGL"])
+                
+                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+                submitted = st.form_submit_button("💾 Save Review", type="primary", use_container_width=True)
+
+            if submitted:
+                # Update session state just in case
+                st.session_state.new_vod_notes = v_notes
+                
+                if not v_title or not v_link:
+                    st.error("Title and Video Link are required.")
+                else:
+                    new_id = str(uuid.uuid4())[:8]
+                    new_review = {
+                        'ID': new_id,
+                        'Title': v_title,
+                        'Type': v_type,
+                        'VideoLink': v_link,
+                        'Map': v_map,
+                        'Agent': v_agent if v_agent != "None" else "",
+                        'Player': v_player if v_player != "None" else "",
+                        'Notes': v_notes,
+                        'Tags': ", ".join(v_tags),
+                        'CreatedBy': current_user,
+                        'CreatedAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    updated = pd.concat([df_vods, pd.DataFrame([new_review])], ignore_index=True)
+                    save_vod_reviews(updated)
+                    st.success("Review saved! Go to 'Review Library' to watch and edit.")
+                    # Reset
+                    st.session_state.new_vod_notes = ""
+                    st.rerun()
+
+    with tab_lib:
+        if df_vods.empty:
+            st.info("No reviews found. Create one in the 'New Review' tab.")
+        else:
+            # Filters
+            c_s, c_f1, c_f2, c_f3 = st.columns([1.5, 1, 1, 1])
+            search_q = c_s.text_input("🔍 Search", placeholder="Title, Notes, Tags...")
+            f_map = c_f1.multiselect("Map", df_vods['Map'].unique())
+            f_type = c_f2.multiselect("Type", df_vods['Type'].unique())
+            f_player = c_f3.multiselect("Player", df_vods['Player'].unique())
+            
+            view_df = df_vods.copy()
+            
+            if search_q:
+                q = search_q.lower()
+                view_df = view_df[view_df.apply(lambda x: q in str(x['Title']).lower() or q in str(x['Notes']).lower() or q in str(x['Tags']).lower(), axis=1)]
+            
+            if f_map: view_df = view_df[view_df['Map'].isin(f_map)]
+            if f_type: view_df = view_df[view_df['Type'].isin(f_type)]
+            if f_player: view_df = view_df[view_df['Player'].isin(f_player)]
+            
+            st.markdown(f"**Showing {len(view_df)} Reviews**")
+            
+            for idx, row in view_df.sort_values('CreatedAt', ascending=False).iterrows():
+                with st.expander(f"📹 {row['Title']} ({row['Map']}) - {row['Type']}", expanded=False):
+                    c_v, c_n = st.columns([1.5, 1])
+                    
+                    with c_v:
+                        # Timestamp Logic
+                        start_key = f"vod_start_{row['ID']}"
+                        if start_key not in st.session_state: st.session_state[start_key] = 0
+                        
+                        st.video(row['VideoLink'], start_time=st.session_state[start_key])
+                        st.caption(f"Created by {row['CreatedBy']} on {row['CreatedAt']}")
+                        if row['Tags']: st.markdown(f"**Tags:** `{row['Tags']}`")
+                        
+                        # Extract timestamps from notes
+                        if row['Notes']:
+                            ts_matches = re.findall(r"\b(\d{1,2}:\d{2}(?::\d{2})?)\b", row['Notes'])
+                            if ts_matches:
+                                st.markdown("**⏱️ Jump to Timestamp:**")
+                                unique_ts = sorted(list(set(ts_matches)), key=lambda x: [int(t) for t in x.split(':')])
+                                cols_ts = st.columns(6)
+                                for i, ts in enumerate(unique_ts):
+                                    parts = list(map(int, ts.split(':')))
+                                    sec = 0
+                                    if len(parts)==2: sec = parts[0]*60 + parts[1]
+                                    elif len(parts)==3: sec = parts[0]*3600 + parts[1]*60 + parts[2]
+                                    
+                                    if cols_ts[i%6].button(ts, key=f"ts_{row['ID']}_{ts}_{i}"):
+                                        st.session_state[start_key] = sec
+                                        st.rerun()
+                    
+                    with c_n:
+                        st.markdown("### 📝 Notes")
+                        
+                        # Edit Mode
+                        edit_key = f"edit_vod_{row['ID']}"
+                        if edit_key not in st.session_state: st.session_state[edit_key] = False
+                        
+                        if st.session_state[edit_key]:
+                            # Edit Mode with Paste
+                            if HAS_CLIPBOARD:
+                                p_edit = paste(label="📋 Paste Image", key=f"paste_edit_{row['ID']}")
+                                if p_edit:
+                                    try:
+                                        if isinstance(p_edit, str) and "," in p_edit: p_edit = p_edit.split(",")[1]
+                                        ib = base64.b64decode(p_edit)
+                                        fn = f"VOD_SNAP_{uuid.uuid4().hex[:8]}.png"
+                                        with open(os.path.join(VOD_IMG_DIR, fn), "wb") as f: f.write(ib)
+                                        
+                                        # Append to current notes in text area (requires rerun to update value)
+                                        # We can't easily update the widget value directly without session state binding
+                                        # But we can update the dataframe temporarily or just show a message to copy code
+                                        st.info(f"Image saved! Add this tag to your notes: [[img:{fn}]]")
+                                    except: pass
+
+                            new_notes = st.text_area("Edit Notes", value=row['Notes'], height=400, key=f"edit_area_{row['ID']}")
+                            c_s, c_c = st.columns(2)
+                            if c_s.button("💾 Save", key=f"save_{row['ID']}"):
+                                df_vods.loc[df_vods['ID'] == row['ID'], 'Notes'] = new_notes
+                                save_vod_reviews(df_vods)
+                                st.session_state[edit_key] = False
+                                st.success("Saved!")
+                                st.rerun()
+                            if c_c.button("❌ Cancel", key=f"cancel_{row['ID']}"):
+                                st.session_state[edit_key] = False
+                                st.rerun()
+                        else:
+                            render_rich_notes(row['Notes'])
+                            if st.button("✏️ Edit Notes", key=f"edit_btn_{row['ID']}"):
+                                st.session_state[edit_key] = True
+                                st.rerun()
+                        
+                        # --- TELESTRATOR (DRAWING) ---
+                        st.divider()
+                        with st.expander("🎨 Telestrator (Draw on Video Frame)"):
+                            st.caption("1. Pause Video ⏸️  2. Screenshot (Win+Shift+S) 📸  3. Paste below 📋  4. Draw & Save 💾")
+                            
+                            ts_key_bg = f"ts_bg_{row['ID']}"
+                            if ts_key_bg not in st.session_state: st.session_state[ts_key_bg] = None
+                            
+                            # Paste Button
+                            if HAS_CLIPBOARD:
+                                p_ts = paste(label="📋 Paste Screenshot", key=f"paste_ts_{row['ID']}")
+                                if p_ts:
+                                    try:
+                                        if isinstance(p_ts, str) and "," in p_ts: p_ts = p_ts.split(",")[1]
+                                        ib = base64.b64decode(p_ts)
+                                        img = Image.open(io.BytesIO(ib))
+                                        # Resize for canvas (max width 600 to fit column)
+                                        base_width = 600
+                                        w_percent = (base_width / float(img.size[0]))
+                                        h_size = int((float(img.size[1]) * float(w_percent)))
+                                        img = img.resize((base_width, h_size), Image.Resampling.LANCZOS)
+                                        st.session_state[ts_key_bg] = img
+                                        st.rerun()
+                                    except Exception as e: st.error(f"Error: {e}")
+                            
+                            if st.session_state[ts_key_bg]:
+                                # Toolbar
+                                c_t1, c_t2, c_t3 = st.columns([1,1,1])
+                                mode = c_t1.selectbox("Tool", ["freedraw", "line", "rect", "circle"], key=f"tool_{row['ID']}")
+                                color = c_t2.color_picker("Color", "#00BFFF", key=f"col_{row['ID']}")
+                                stroke = c_t3.slider("Width", 1, 10, 3, key=f"wid_{row['ID']}")
+                                
+                                canvas_result = st_canvas(
+                                    fill_color="rgba(255, 165, 0, 0.1)", stroke_width=stroke, stroke_color=color,
+                                    background_image=st.session_state[ts_key_bg], update_streamlit=True,
+                                    height=st.session_state[ts_key_bg].height, width=st.session_state[ts_key_bg].width,
+                                    drawing_mode=mode, key=f"canvas_{row['ID']}",
+                                )
+                                
+                                if st.button("💾 Save Analysis to Notes", key=f"save_ts_{row['ID']}"):
+                                    if canvas_result.image_data is not None:
+                                        bg = st.session_state[ts_key_bg].convert("RGBA")
+                                        fg = Image.fromarray(canvas_result.image_data.astype('uint8'), "RGBA")
+                                        if fg.size != bg.size: fg = fg.resize(bg.size)
+                                        final = Image.alpha_composite(bg, fg)
+                                        fn = f"VOD_ANALY_{uuid.uuid4().hex[:8]}.png"
+                                        final.save(os.path.join(VOD_IMG_DIR, fn))
+                                        
+                                        df_vods.loc[df_vods['ID'] == row['ID'], 'Notes'] = (row['Notes'] if row['Notes'] else "") + f"\n\n**Analysis:**\n[[img:{fn}]]\n"
+                                        save_vod_reviews(df_vods)
+                                        st.success("Saved to notes!"); st.rerun()
+
+                        st.divider()
+                        
+                        if st.button("🗑️ Delete Review", key=f"del_vod_{row['ID']}"):
+                            updated = df_vods[df_vods['ID'] != row['ID']]
+                            save_vod_reviews(updated)
+                            st.rerun()
 
 # ==============================================================================
 # 8. DATABASE
