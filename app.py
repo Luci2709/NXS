@@ -1099,10 +1099,17 @@ def parse_tracker_json(file_input):
             with open(file_input, 'r', encoding='utf-8') as f: data = json.load(f)
         else: data = json.load(file_input)
         parsed_data = []
-        matches = data.get('data', {}).get('matches', [])
-        if not matches:
-            d = data.get('data', {})
-            if 'metadata' in d and 'segments' in d: matches = [d]
+        
+        matches = []
+        if isinstance(data, dict):
+            if 'data' in data and isinstance(data['data'], dict) and 'matches' in data['data']:
+                matches = data['data']['matches']
+            elif 'data' in data and isinstance(data['data'], dict) and 'metadata' in data['data']:
+                matches = [data['data']]
+            elif 'metadata' in data and 'segments' in data:
+                matches = [data]
+        elif isinstance(data, list):
+            matches = data
         
         if matches:
             for m in matches:
@@ -3967,19 +3974,6 @@ elif page == "📹 VOD REVIEW":
 
     # --- STATE MANAGEMENT FOR VOD WORKSPACE ---
     if 'active_vod_id' not in st.session_state: st.session_state.active_vod_id = None
-    if 'vod_timer_running' not in st.session_state: st.session_state.vod_timer_running = False
-    if 'vod_timer_start' not in st.session_state: st.session_state.vod_timer_start = 0
-    if 'vod_timer_offset' not in st.session_state: st.session_state.vod_timer_offset = 0
-
-    def get_timer_seconds():
-        if st.session_state.vod_timer_running:
-            return st.session_state.vod_timer_offset + (time.time() - st.session_state.vod_timer_start)
-        return st.session_state.vod_timer_offset
-
-    def fmt_timer(seconds):
-        m = int(seconds // 60)
-        s = int(seconds % 60)
-        return f"{m}:{s:02d}"
     
     # --- VIEW 1: LIBRARY (GRID) ---
     if st.session_state.active_vod_id is None:
@@ -4099,30 +4093,6 @@ elif page == "📹 VOD REVIEW":
             try: rounds_data = json.loads(row['Rounds']) if pd.notna(row.get('Rounds')) and row['Rounds'] else []
             except: rounds_data = []
 
-            # 1. LIVE LOGGING TIMER
-            st.markdown("#### ⏱️ Live Logger")
-            c_t1, c_t2, c_t3 = st.columns([1, 1, 2])
-            
-            # Timer Controls
-            if st.session_state.vod_timer_running:
-                if c_t1.button("⏸️ Pause"):
-                    st.session_state.vod_timer_offset += time.time() - st.session_state.vod_timer_start
-                    st.session_state.vod_timer_running = False
-                    st.rerun()
-            else:
-                if c_t1.button("▶️ Start"):
-                    st.session_state.vod_timer_start = time.time()
-                    st.session_state.vod_timer_running = True
-                    st.rerun()
-            
-            if c_t2.button("🔄 Reset"):
-                st.session_state.vod_timer_running = False
-                st.session_state.vod_timer_offset = 0
-                st.rerun()
-            
-            curr_time_str = fmt_timer(get_timer_seconds())
-            c_t3.metric("Timer", curr_time_str, label_visibility="collapsed")
-
             # 2. NOTES EDITOR
             st.markdown("#### 📝 Analysis")
             st.divider()
@@ -4131,39 +4101,9 @@ elif page == "📹 VOD REVIEW":
             if 'wk_notes_temp' not in st.session_state:
                 st.session_state.wk_notes_temp = row['Notes']
 
-            # Paste Image Button
-            # --- PASTE HELPER ---
-            # We handle paste outside the specific text area logic to make it available for both modes
-            pasted_img_code = ""
-            if HAS_CLIPBOARD:
-                p_wk = paste(label="📋 Paste Image", key="wk_paste_btn")
-                if p_wk:
-                    try:
-                        if isinstance(p_wk, str) and "," in p_wk: p_wk = p_wk.split(",")[1]
-                        ib = base64.b64decode(p_wk)
-                        fn = f"VOD_SNAP_{uuid.uuid4().hex[:8]}.png"
-                        with open(os.path.join(VOD_IMG_DIR, fn), "wb") as f: f.write(ib)
-                        pasted_img_code = f"\n[[img:{fn}]]\n"
-                        st.success("Image pasted!")
-                        st.session_state['last_pasted_vod_img'] = fn # Save reference for export
-                    except: pass
-            
-            # Fallback File Uploader
-            u_wk = st.file_uploader("Or Upload Image", type=['png', 'jpg'], key="wk_upload_btn")
-            if u_wk:
-                fn = f"VOD_UP_{uuid.uuid4().hex[:8]}.png"
-                with open(os.path.join(VOD_IMG_DIR, fn), "wb") as f: f.write(u_wk.getvalue())
-                pasted_img_code = f"\n[[img:{fn}]]\n"
-                st.session_state['last_pasted_vod_img'] = fn # Save reference for export
-
             if mode == "📝 General Notes":
                 if 'wk_notes_temp' not in st.session_state: st.session_state.wk_notes_temp = row['Notes']
                 
-                # Append pasted image if any
-                if pasted_img_code: 
-                    st.session_state.wk_notes_temp += pasted_img_code
-                    st.rerun()
-
                 notes_val = st.text_area("General Notes", value=st.session_state.wk_notes_temp, height=400, key="wk_notes_area")
                 st.session_state.wk_notes_temp = notes_val
             
@@ -4175,7 +4115,7 @@ elif page == "📹 VOD REVIEW":
                 # Round Navigation
                 if not curr_rounds:
                     if st.button("➕ Add Round 1"):
-                        curr_rounds.append({'Round': 1, 'Time': fmt_timer(get_timer_seconds()), 'Result': '?', 'Notes': ''})
+                        curr_rounds.append({'Round': 1, 'Time': '00:00', 'Result': '?', 'Notes': ''})
                         st.session_state.wk_rounds_temp = curr_rounds
                         st.rerun()
                     st.info("No rounds yet.")
@@ -4189,7 +4129,7 @@ elif page == "📹 VOD REVIEW":
                     if c_next.button("▶", disabled=(idx==len(curr_rounds)-1)): st.session_state.curr_round_idx += 1; st.rerun()
                     if c_add.button("➕"): 
                         new_r = len(curr_rounds) + 1
-                        curr_rounds.append({'Round': new_r, 'Time': fmt_timer(get_timer_seconds()), 'Result': '?', 'Notes': ''})
+                        curr_rounds.append({'Round': new_r, 'Time': '00:00', 'Result': '?', 'Notes': ''})
                         st.session_state.curr_round_idx = len(curr_rounds) - 1
                         st.rerun()
                     
@@ -4215,11 +4155,6 @@ elif page == "📹 VOD REVIEW":
                     cur_r['Time'] = c_meta1.text_input("Timestamp", cur_r['Time'])
                     cur_r['Result'] = c_meta2.selectbox("Result", ["Win", "Loss", "?"], index=["Win", "Loss", "?"].index(cur_r.get('Result', '?')))
                     
-                    # Append pasted image to round notes
-                    if pasted_img_code:
-                        cur_r['Notes'] += pasted_img_code
-                        st.rerun()
-
                     cur_r['Notes'] = st.text_area(f"Notes for Round {cur_r['Round']}", value=cur_r['Notes'], height=300, key=f"r_note_{st.session_state.curr_round_idx}")
                     
                     # Update List
@@ -4255,24 +4190,6 @@ elif page == "📹 VOD REVIEW":
                     if is_new:
                         st.session_state.active_vod_id = None # Return to library
                         st.rerun()
-
-            # 4. TIMESTAMPS LIST (Clickable)
-            st.divider()
-            st.markdown("#### 📍 Timestamps")
-            if notes_val:
-                ts_matches = re.findall(r"\b(\d{1,2}:\d{2}(?::\d{2})?)\b", notes_val)
-                if ts_matches:
-                    unique_ts = sorted(list(set(ts_matches)), key=lambda x: [int(t) for t in x.split(':')])
-                    cols_ts = st.columns(4)
-                    for i, ts in enumerate(unique_ts):
-                        parts = list(map(int, ts.split(':')))
-                        sec = 0
-                        if len(parts)==2: sec = parts[0]*60 + parts[1]
-                        elif len(parts)==3: sec = parts[0]*3600 + parts[1]*60 + parts[2]
-                        
-                        if cols_ts[i%4].button(ts, key=f"jump_{ts}"):
-                            st.session_state[f"seek_{row['ID']}"] = sec
-                            st.rerun()
 
             # 5. TELESTRATOR
             with st.expander("🎨 Telestrator"):
@@ -4330,37 +4247,57 @@ elif page == "📹 VOD REVIEW":
                 st.caption("Create a lineup card directly from this VOD.")
                 
                 l_exp_title = st.text_input("Lineup Title", placeholder="e.g. Sova Dart for B Main", key="lu_exp_title")
+                
                 c_lu1, c_lu2 = st.columns(2)
-                l_exp_type = c_lu1.selectbox("Type", ["Recon", "Shock", "Molly", "Flash", "Smoke", "Wall", "Ult", "One-Way"], key="lu_exp_type")
+                
+                # Agent from VOD
+                vod_agent = row['Agent'] if row['Agent'] else "Sova"
+                
+                # Abilities
+                avail_abils = AGENT_ABILITIES.get(vod_agent, {})
+                abil_opts = [f"{k}: {v}" for k, v in avail_abils.items()] if avail_abils else ["Default"]
+                l_exp_ability = c_lu1.selectbox("Ability", abil_opts, key="lu_exp_abil")
+                
                 l_exp_side = c_lu2.selectbox("Side", ["Attack", "Defense"], key="lu_exp_side")
                 
-                l_src = st.radio("Content Source", ["Video Link (Current VOD)", "Last Pasted Image"], horizontal=True, key="lu_src_sel")
+                # Tags
+                l_exp_tags = st.multiselect("Tags / Type", ["Recon", "Shock", "Molly", "Flash", "Smoke", "Wall", "Ult", "One-Way", "God Spot", "Retake"], key="lu_exp_tags")
                 
                 if st.button("📤 Export to Library", key="btn_export_lu", use_container_width=True):
                     if not l_exp_title:
                         st.error("Title required.")
                     else:
-                        final_img_name = ""
-                        final_vid_link = ""
+                        # Clean Ability Name
+                        final_type = l_exp_ability.split(": ")[1] if ": " in l_exp_ability else l_exp_ability
+                        final_tags = ", ".join(l_exp_tags)
                         
-                        if l_src == "Video Link (Current VOD)":
-                            final_vid_link = row['VideoLink']
-                        else:
-                            # Image Logic
-                            if 'last_pasted_vod_img' in st.session_state and st.session_state['last_pasted_vod_img']:
-                                src_path = os.path.join(VOD_IMG_DIR, st.session_state['last_pasted_vod_img'])
-                                if os.path.exists(src_path):
-                                    # Copy to Strat Dir (Lineups use Strat Dir)
-                                    final_img_name = f"LU_EXP_{uuid.uuid4().hex[:8]}.png"
-                                    dst_path = os.path.join(STRAT_IMG_DIR, final_img_name)
-                                    with open(src_path, "rb") as f_src:
-                                        with open(dst_path, "wb") as f_dst:
-                                            f_dst.write(f_src.read())
-                                else:
-                                    st.error("Source image not found.")
-                            else:
-                                st.error("No image pasted recently in this session.")
-                        
+                        new_lu = {
+                            'ID': str(uuid.uuid4())[:8],
+                            'Map': row['Map'], 'Agent': vod_agent, 
+                            'Side': l_exp_side, 'Type': final_type,
+                            'Title': l_exp_title, 'Image': "", 'VideoLink': row['VideoLink'],
+                            'Description': f"Exported from VOD: {row['Title']}", 'Tags': final_tags, 
+                            'CreatedBy': current_user
+                        }
+                        db_insert("nexus_lineups", new_lu, "df_lineups")
+                        st.success(f"Exported to Lineup Library!")
+
+        # Delete Button (Bottom)
+        if not is_new:
+            if st.button("🗑️ Delete Review", key="del_wk"):
+                db_delete("nexus_vod_reviews", row['ID'], "df_vods")
+                st.session_state.active_vod_id = None
+                st.rerun()
+
+# ==============================================================================
+# 8. DATABASE
+# ==============================================================================
+elif page == "💾 DATABASE":
+    st.header("Database")
+    ed = st.data_editor(df, num_rows="dynamic")
+    if st.button("Save"): 
+        save_matches(ed)
+        st.success("Saved to Google Sheets")
                         if final_img_name or final_vid_link:
                             new_lu = {
                                 'ID': str(uuid.uuid4())[:8],
@@ -4372,6 +4309,16 @@ elif page == "📹 VOD REVIEW":
                             }
                             db_insert("nexus_lineups", new_lu, "df_lineups")
                             st.success(f"Exported to Lineup Library!")
+                        new_lu = {
+                            'ID': str(uuid.uuid4())[:8],
+                            'Map': row['Map'], 'Agent': vod_agent, 
+                            'Side': l_exp_side, 'Type': final_type,
+                            'Title': l_exp_title, 'Image': "", 'VideoLink': row['VideoLink'],
+                            'Description': f"Exported from VOD: {row['Title']}", 'Tags': final_tags, 
+                            'CreatedBy': current_user
+                        }
+                        db_insert("nexus_lineups", new_lu, "df_lineups")
+                        st.success(f"Exported to Lineup Library!")
 
         # Delete Button (Bottom)
         if not is_new:
