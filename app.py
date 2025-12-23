@@ -132,19 +132,17 @@ def load_users_db():
         return pd.DataFrame(data)
 
 def save_users_db(df):
-    def _task():
-        try: 
-            # Prepare data: Ensure NaNs are None for JSON
-            df_save = df.copy()
-            if 'ID' in df_save.columns: df_save.rename(columns={'ID': 'id'}, inplace=True)
-            
-            records = df_save.where(pd.notnull(df_save), None).to_dict(orient='records')
-            
-            # Upsert using 'id' if present, otherwise might duplicate if not careful.
-            # Assuming Username is unique or ID is handled.
-            supabase.table("nexus_users").upsert(records).execute()
-        except Exception as e: print(f"DB Error: {e}")
-    threading.Thread(target=_task).start()
+    try: 
+        # Prepare data: Ensure NaNs are None for JSON
+        df_save = df.copy()
+        if 'ID' in df_save.columns: df_save.rename(columns={'ID': 'id'}, inplace=True)
+        
+        records = df_save.where(pd.notnull(df_save), None).to_dict(orient='records')
+        
+        # Upsert using 'id' if present, otherwise might duplicate if not careful.
+        # Assuming Username is unique or ID is handled.
+        supabase.table("nexus_users").upsert(records).execute()
+    except Exception as e: print(f"DB Error: {e}")
 
 def check_credentials(username, password, df_users):
     if df_users.empty: return None
@@ -815,62 +813,57 @@ def _sync_data(table_name, df):
     Performs UPSERT for existing/new rows.
     Performs DELETE for rows that are in DB but missing in DF (based on 'ID').
     """
-    def _task():
-        try:
-            # 1. Fetch current IDs from DB
-            curr_res = supabase.table(table_name).select("id").execute()
-            db_ids = {row['id'] for row in curr_res.data}
+    try:
+        # 1. Fetch current IDs from DB
+        curr_res = supabase.table(table_name).select("id").execute()
+        db_ids = {row['id'] for row in curr_res.data}
+        
+        # 2. Get IDs from current DF (Assuming column is 'ID')
+        # Ensure 'ID' exists
+        if 'ID' not in df.columns and 'id' in df.columns:
+            df.rename(columns={'id': 'ID'}, inplace=True)
+        
+        if 'ID' in df.columns:
+            df_ids = set(df['ID'].astype(str).tolist())
             
-            # 2. Get IDs from current DF (Assuming column is 'ID')
-            # Ensure 'ID' exists
-            if 'ID' not in df.columns and 'id' in df.columns:
-                df.rename(columns={'id': 'ID'}, inplace=True)
+            # 3. Identify IDs to delete
+            ids_to_delete = list(db_ids - df_ids)
             
-            if 'ID' in df.columns:
-                df_ids = set(df['ID'].astype(str).tolist())
-                
-                # 3. Identify IDs to delete
-                ids_to_delete = list(db_ids - df_ids)
-                
-                if ids_to_delete:
-                    supabase.table(table_name).delete().in_("id", ids_to_delete).execute()
+            if ids_to_delete:
+                supabase.table(table_name).delete().in_("id", ids_to_delete).execute()
 
-            # 4. Prepare data for Upsert
-            df_save = df.copy()
-            # Rename ID -> id for Supabase
-            if 'ID' in df_save.columns:
-                df_save.rename(columns={'ID': 'id'}, inplace=True)
-            
-            # Clean data (NaN -> None)
-            records = df_save.where(pd.notnull(df_save), None).to_dict(orient='records')
-            
-            if records:
-                supabase.table(table_name).upsert(records).execute()
-            
-            st.cache_data.clear()
-        except Exception as e:
-            print(f"Sync Error ({table_name}): {e}")
-            
-    threading.Thread(target=_task).start()
+        # 4. Prepare data for Upsert
+        df_save = df.copy()
+        # Rename ID -> id for Supabase
+        if 'ID' in df_save.columns:
+            df_save.rename(columns={'ID': 'id'}, inplace=True)
+        
+        # Clean data (NaN -> None)
+        records = df_save.where(pd.notnull(df_save), None).to_dict(orient='records')
+        
+        if records:
+            supabase.table(table_name).upsert(records).execute()
+        
+        st.cache_data.clear()
+    except Exception as e:
+        print(f"Sync Error ({table_name}): {e}")
 
 def _upsert_only(table_name, df):
     """
     Only Upserts data. Good for append-only logs like matches/stats.
     """
-    def _task():
-        try:
-            df_save = df.copy()
-            if 'ID' in df_save.columns: df_save.rename(columns={'ID': 'id'}, inplace=True)
-            # MatchID handling: If Supabase uses 'id' as PK but MatchID is the logical key,
-            # we rely on the schema. Assuming MatchID is just a column.
-            
-            records = df_save.where(pd.notnull(df_save), None).to_dict(orient='records')
-            if records:
-                supabase.table(table_name).upsert(records).execute()
-            st.cache_data.clear()
-        except Exception as e:
-            print(f"Upsert Error ({table_name}): {e}")
-    threading.Thread(target=_task).start()
+    try:
+        df_save = df.copy()
+        if 'ID' in df_save.columns: df_save.rename(columns={'ID': 'id'}, inplace=True)
+        # MatchID handling: If Supabase uses 'id' as PK but MatchID is the logical key,
+        # we rely on the schema. Assuming MatchID is just a column.
+        
+        records = df_save.where(pd.notnull(df_save), None).to_dict(orient='records')
+        if records:
+            supabase.table(table_name).upsert(records).execute()
+        st.cache_data.clear()
+    except Exception as e:
+        print(f"Upsert Error ({table_name}): {e}")
 
 # --- MAPPING SAVE FUNCTIONS ---
 # Since the prompt asked to keep "id" as primary key, we use _sync_data 
@@ -892,36 +885,32 @@ def save_vod_reviews(df_new): _sync_data("nexus_vod_reviews", df_new)
 def save_lineups(df_new): _sync_data("nexus_lineups", df_new)
 
 def update_availability(scrim_id, player, status):
-    def _task():
-        try:
-            # Upsert specific row
-            data = {
-                'ScrimID': scrim_id,
-                'Player': player,
-                'Available': status,
-                'UpdatedAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            # Note: Scrim Availability might not have a simple 'id'. 
-            # If 'id' is auto-gen, we need to find the row first or use match constraints.
-            # Assuming 'id' exists. We query to find ID if exists.
-            res = supabase.table("scrim_availability").select("id").eq("ScrimID", scrim_id).eq("Player", player).execute()
-            if res.data:
-                data['id'] = res.data[0]['id']
-            
-            supabase.table("scrim_availability").upsert(data).execute()
-            st.cache_data.clear()
-        except Exception as e: print(f"Avail Update Error: {e}")
-    threading.Thread(target=_task).start()
+    try:
+        # Upsert specific row
+        data = {
+            'ScrimID': scrim_id,
+            'Player': player,
+            'Available': status,
+            'UpdatedAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        # Note: Scrim Availability might not have a simple 'id'. 
+        # If 'id' is auto-gen, we need to find the row first or use match constraints.
+        # Assuming 'id' exists. We query to find ID if exists.
+        res = supabase.table("scrim_availability").select("id").eq("ScrimID", scrim_id).eq("Player", player).execute()
+        if res.data:
+            data['id'] = res.data[0]['id']
+        
+        supabase.table("scrim_availability").upsert(data).execute()
+        st.cache_data.clear()
+    except Exception as e: print(f"Avail Update Error: {e}")
 
 def delete_scrim(scrim_id):
-    def _task():
-        try:
-            supabase.table("scrims").delete().eq("id", scrim_id).execute()
-            # Also delete availability
-            supabase.table("scrim_availability").delete().eq("ScrimID", scrim_id).execute()
-            st.cache_data.clear()
-        except Exception as e: print(f"Del Scrim Error: {e}")
-    threading.Thread(target=_task).start()
+    try:
+        supabase.table("scrims").delete().eq("id", scrim_id).execute()
+        # Also delete availability
+        supabase.table("scrim_availability").delete().eq("ScrimID", scrim_id).execute()
+        st.cache_data.clear()
+    except Exception as e: print(f"Del Scrim Error: {e}")
 
 # ==============================================================================
 # 🚀 DATA LOADER
@@ -1608,7 +1597,7 @@ elif page == "👥 COACHING":
         with tab1:
             st.markdown("### 📝 Assign Tasks to Players")
             
-            with st.form("assign_todo"):
+            with st.form("assign_todo", clear_on_submit=True):
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -1871,7 +1860,7 @@ elif page == "⚽ SCRIMS":
     if user_role == 'coach':
         with other_tabs[0]:
             st.markdown("### ➕ Create New Scrim")
-            with st.form("create_scrim"):
+            with st.form("create_scrim", clear_on_submit=True):
                 c1, c2 = st.columns(2)
                 with c1:
                     title = st.text_input("Scrim Title", placeholder="e.g., Weekly Scrim vs Team X")
@@ -1978,7 +1967,7 @@ elif page == "📝 MATCH ENTRY":
             except Exception as e: st.error(str(e))
 
     d = st.session_state['fd']
-    with st.form("e"):
+    with st.form("e", clear_on_submit=True):
         c1,c2=st.columns(2)
         with c1:
             maps=sorted(["Ascent","Bind","Haven","Split","Lotus","Sunset","Abyss","Pearl","Fracture","Icebox","Breeze","Corrode"])
@@ -2023,7 +2012,9 @@ elif page == "📝 MATCH ENTRY":
                 updated_stats = pd.concat([ps_old, pd.DataFrame(d['p_stats'])], ignore_index=True)
                 save_player_stats(updated_stats)
                 
-            st.success("Saved!"); st.cache_data.clear(); st.rerun()
+            # Reset local state to defaults so form doesn't repopulate with old data
+            st.session_state['fd'] = {'d':datetime.today(), 'm':'Ascent', 'r':'W', 'us':13, 'en':8, 'mid':'', 'vod':'', 'my':[""]*5, 'en':[""]*5, 'hm':None, 'p_stats':[]}
+            st.success("Saved!"); st.rerun()
 
 # ==============================================================================
 # 3. MAP ANALYZER
@@ -2164,7 +2155,7 @@ elif page == "📘 STRATEGY BOARD":
             with c1: st.subheader("Active Playbooks")
             with c2: 
                 with st.popover("➕ New Playbook"):
-                    with st.form("create_pb"):
+                    with st.form("create_pb", clear_on_submit=True):
                         pm = st.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"])
                         pn = st.text_input("Playbook Name (e.g. 'Standard Default')")
                         st.caption("Select Composition:")
@@ -2688,7 +2679,7 @@ elif page == "📘 STRATEGY BOARD":
                 else:
                     st.warning(f"Clipboard feature unavailable. Error: {CLIPBOARD_ERR}\n\nTry restarting the app if you just installed `st-img-pastebutton`.")
 
-                with st.form("add_pb_strat"):
+                with st.form("add_pb_strat", clear_on_submit=True):
                     c_name, c_tag = st.columns([3, 1])
                     sn = c_name.text_input("Strategy Name")
                     s_tag = c_tag.selectbox("Tag", ["Default", "Set Play", "Pistol", "Eco", "Anti-Eco", "Bonus", "Retake"])
@@ -2937,7 +2928,7 @@ elif page == "📘 STRATEGY BOARD":
                 pasted_lu = paste(label="📋 Paste Image", key="paste_lu")
                 if pasted_lu: st.success("Image captured!")
             
-            with st.form("add_lineup"):
+            with st.form("add_lineup", clear_on_submit=True):
                 c1, c2 = st.columns(2)
                 l_map = c1.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"], key="lu_map")
                 l_agent = c2.selectbox("Agent", sorted(df_players['Agent'].unique()) if not df_players.empty else ["Sova"], key="lu_agent")
@@ -3026,7 +3017,7 @@ elif page == "📘 STRATEGY BOARD":
         
         # --- 1. ADD NEW LINK ---
         with st.expander("➕ Add New External Link"):
-            with st.form("pb_link_form"):
+            with st.form("pb_link_form", clear_on_submit=True):
                 c1, c2 = st.columns([1, 2])
                 with c1:
                     pm = st.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"], key="lm")
@@ -3121,7 +3112,7 @@ elif page == "📚 RESOURCES":
     # df_res loaded globally
     
     with st.expander("➕ Add"):
-        with st.form("ra"):
+        with st.form("ra", clear_on_submit=True):
             rt = st.text_input("Title"); rl = st.text_input("Link"); rc = st.selectbox("Cat", ["Theory", "Lineups", "Setup", "Playbook Theory"]); rn = st.text_area("Note")
             if st.form_submit_button("Save"):
                 updated = pd.concat([df_res, pd.DataFrame([{'Title': rt, 'Link': rl, 'Category': rc, 'Note': rn}])], ignore_index=True)
@@ -3210,7 +3201,7 @@ elif page == "📅 CALENDAR":
                         st.markdown(h+"</div>", unsafe_allow_html=True)
         
         with st.expander("Add Event"):
-            with st.form("ca"):
+            with st.form("ca", clear_on_submit=True):
                 c_d, c_t = st.columns(2)
                 cd=c_d.date_input("Date"); ct=c_t.time_input("Time")
                 ce=st.text_input("Event Name"); 
