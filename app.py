@@ -807,6 +807,45 @@ def render_visual_selection(options, type_item, key_prefix, default=None, multi=
 # 💾 SUPABASE DATA HANDLERS
 # ==============================================================================
 
+# --- NEW: SURGICAL DB OPERATIONS (FAST) ---
+def db_insert(table_name, record):
+    """Inserts a single record directly. Much faster than syncing the whole DF."""
+    try:
+        # Map ID -> id for Supabase
+        rec = record.copy()
+        if 'ID' in rec: rec['id'] = rec.pop('ID')
+        
+        supabase.table(table_name).insert(rec).execute()
+        st.cache_data.clear()
+        return True
+    except Exception as e:
+        st.error(f"Database Insert Error ({table_name}): {e}")
+        return False
+
+def db_update(table_name, record):
+    """Updates a single record by ID."""
+    try:
+        rec = record.copy()
+        if 'ID' in rec: rec['id'] = rec.pop('ID')
+        if 'id' not in rec: raise ValueError("Missing ID for update")
+        
+        supabase.table(table_name).update(rec).eq("id", rec['id']).execute()
+        st.cache_data.clear()
+        return True
+    except Exception as e:
+        st.error(f"Database Update Error ({table_name}): {e}")
+        return False
+
+def db_delete(table_name, record_id):
+    """Deletes a single record by ID."""
+    try:
+        supabase.table(table_name).delete().eq("id", record_id).execute()
+        st.cache_data.clear()
+        return True
+    except Exception as e:
+        st.error(f"Database Delete Error ({table_name}): {e}")
+        return False
+
 def _sync_data(table_name, df):
     """
     Synchronizes the DataFrame with Supabase.
@@ -874,6 +913,7 @@ def save_player_stats(df_new): _upsert_only("Premier - PlayerStats", df_new)
 def save_scrims(df_new): _sync_data("scrims", df_new)
 def save_scrim_availability(df_new): _upsert_only("scrim_availability", df_new)
 def save_player_todos(df_new): _sync_data("player_todos", df_new)
+# Bulk saves (still used for data_editor or reordering)
 def save_legacy_playbooks(df_new): _sync_data("playbooks", df_new)
 def save_pb_strats(df_new): _sync_data("nexus_pb_strats", df_new) # Reordering logic relies on sync
 def save_map_theory(df_new): _sync_data("nexus_map_theory", df_new)
@@ -884,6 +924,7 @@ def save_simple_todos(df_new): _sync_data("todo", df_new)
 def save_vod_reviews(df_new): _sync_data("nexus_vod_reviews", df_new)
 def save_lineups(df_new): _sync_data("nexus_lineups", df_new)
 
+# Specific Availability Update
 def update_availability(scrim_id, player, status):
     try:
         # Upsert specific row
@@ -1658,9 +1699,7 @@ elif page == "👥 COACHING":
                             'CompletedAt': ""
                         }
                         
-                        # Save to GSheets
-                        updated_todos = pd.concat([df_todos, pd.DataFrame([new_todo])], ignore_index=True)
-                        save_player_todos(updated_todos)
+                        db_insert("player_todos", new_todo)
                         
                         # DISCORD NOTIFICATION
                         send_discord_notification(player, title, description)
@@ -1775,6 +1814,7 @@ elif page == "👥 COACHING":
                                     # Delete task instead of just marking it
                                     df_todos = df_todos[df_todos['ID'] != todo['ID']]
                                     save_player_todos(df_todos)
+                                    db_delete("player_todos", todo['ID'])
                                     st.success("Task completed and removed!")
                                     st.rerun()
                             else:
@@ -1782,6 +1822,7 @@ elif page == "👥 COACHING":
                                 if st.button("🗑️ Delete", key=f"del_comp_{todo['ID']}"):
                                     df_todos = df_todos[df_todos['ID'] != todo['ID']]
                                     save_player_todos(df_todos)
+                                    db_delete("player_todos", todo['ID'])
                                     st.rerun()
 
 # ==============================================================================
@@ -1864,7 +1905,9 @@ elif page == "⚽ SCRIMS":
                         # Coach actions
                         if user_role == 'coach':
                             if st.button("🗑️ Delete Scrim", key=f"del_{scrim_id}", use_container_width=True):
-                                delete_scrim(scrim_id); st.rerun()
+                                db_delete("scrims", scrim_id)
+                                # Availability cleanup is handled by DB constraints usually, or we leave orphans for now
+                                st.rerun()
 
     elif st.session_state.scrim_nav == "➕ Create Scrim":
         st.markdown("### ➕ Create New Scrim")
@@ -1900,8 +1943,7 @@ elif page == "⚽ SCRIMS":
                         'PlaybookLink': playbook_link if playbook_link != "None" else "",
                         'VideoLink': video_link
                     }
-                    updated = pd.concat([df_scrims, pd.DataFrame([new_scrim])], ignore_index=True)
-                    save_scrims(updated)
+                    db_insert("scrims", new_scrim)
                     
                     # Manual Clear & Redirect
                     for k in ["scrim_title", "scrim_desc", "scrim_vid"]:
@@ -2015,16 +2057,13 @@ elif page == "📝 MATCH ENTRY":
             row={'Date':dt.strftime("%d.%m.%Y"),'Map':mp,'Result':re,'Score_Us':us,'Score_Enemy':en,'MatchID':mi,'Source':'Tracker' if d['hm'] else 'Manual','VOD_Link':vo,'Atk_R_W':aw,'Atk_R_L':al,'Def_R_W':dw,'Def_R_L':dl}
             for i in range(5): row[f'MyComp_{i+1}']=my_final[i]; row[f'EnComp_{i+1}']=en_f[i] if i<len(en_f) else ""
             
-            # Save Matches to GSheets
-            old = df # Loaded from GSheets
-            updated_matches = pd.concat([old,pd.DataFrame([row])],ignore_index=True)
-            save_matches(updated_matches)
+            # Save Match (Single Row Insert)
+            db_insert("nexus_matches", row)
             
-            # Save Player Stats to GSheets
+            # Save Player Stats (Bulk Insert for new rows only)
             if d['p_stats']:
-                ps_old = df_players # Loaded from GSheets
-                updated_stats = pd.concat([ps_old, pd.DataFrame(d['p_stats'])], ignore_index=True)
-                save_player_stats(updated_stats)
+                try: supabase.table("Premier - PlayerStats").insert(d['p_stats']).execute()
+                except Exception as e: st.error(f"Stats Error: {e}")
                 
             # Reset local state to defaults so form doesn't repopulate with old data
             st.session_state['fd'] = {'d':datetime.today(), 'm':'Ascent', 'r':'W', 'us':13, 'en':8, 'mid':'', 'vod':'', 'my':[""]*5, 'en':[""]*5, 'hm':None, 'p_stats':[]}
@@ -2182,8 +2221,7 @@ elif page == "📘 STRATEGY BOARD":
                             new_row = {'ID': new_id, 'Map': pm, 'Name': pn}
                             for i in range(5): new_row[f'Agent_{i+1}'] = sel_ags[i]
                             
-                            updated = pd.concat([df_team_pb, pd.DataFrame([new_row])], ignore_index=True)
-                            save_team_playbooks(updated)
+                            db_insert("nexus_playbooks", new_row)
                             
                             # Manual Clear
                             if "new_pb_name" in st.session_state: del st.session_state["new_pb_name"]
@@ -2731,8 +2769,7 @@ elif page == "📘 STRATEGY BOARD":
                             with open(os.path.join(STRAT_IMG_DIR, fname), "wb") as f: f.write(image_data)
                             new_strat = {'PB_ID': pb['ID'], 'Strat_ID': str(uuid.uuid4()), 'Name': sn, 'Image': fname, 'Protocols': '[]', 'Notes': s_note, 'Tag': s_tag, 'Order': new_order}
                             
-                            updated = pd.concat([df_pb_strats, pd.DataFrame([new_strat])], ignore_index=True)
-                            save_pb_strats(updated)
+                            db_insert("nexus_pb_strats", new_strat)
                             
                             # Manual Clear
                             for k in ["strat_name", "strat_note"]:
@@ -2760,9 +2797,8 @@ elif page == "📘 STRATEGY BOARD":
                                     prev_order = prev.iloc[0]['Order']
                                     
                                     # Swap in main DF
-                                    df_pb_strats.at[idx, 'Order'] = prev_order
-                                    df_pb_strats.at[prev_idx, 'Order'] = current_order
-                                    save_pb_strats(df_pb_strats)
+                                    db_update("nexus_pb_strats", {'ID': strat['ID'], 'Order': int(prev_order)})
+                                    db_update("nexus_pb_strats", {'ID': prev.iloc[0]['ID'], 'Order': int(current_order)})
                                     st.rerun()
                                     
                             if st.button("⬇️", key=f"dn_{strat['Strat_ID']}"):
@@ -2774,9 +2810,8 @@ elif page == "📘 STRATEGY BOARD":
                                     nxt_order = nxt.iloc[0]['Order']
                                     
                                     # Swap
-                                    df_pb_strats.at[idx, 'Order'] = nxt_order
-                                    df_pb_strats.at[nxt_idx, 'Order'] = current_order
-                                    save_pb_strats(df_pb_strats)
+                                    db_update("nexus_pb_strats", {'ID': strat['ID'], 'Order': int(nxt_order)})
+                                    db_update("nexus_pb_strats", {'ID': nxt.iloc[0]['ID'], 'Order': int(current_order)})
                                     st.rerun()
 
                         with c_content:
@@ -2800,12 +2835,10 @@ elif page == "📘 STRATEGY BOARD":
                                         trig = st.text_input("IF (Trigger)"); react = st.text_input("THEN (Reaction)")
                                         if st.form_submit_button("Add"):
                                             protos.append({'trigger': trig, 'reaction': react})
-                                            df_pb_strats.loc[df_pb_strats['Strat_ID'] == strat['Strat_ID'], 'Protocols'] = json.dumps(protos)
-                                            save_pb_strats(df_pb_strats)
+                                            db_update("nexus_pb_strats", {'ID': strat['ID'], 'Protocols': json.dumps(protos)})
                                             st.rerun()
                                     if st.button("Clear Protocols", key=f"clr_{strat['Strat_ID']}"):
-                                        df_pb_strats.loc[df_pb_strats['Strat_ID'] == strat['Strat_ID'], 'Protocols'] = '[]'
-                                        save_pb_strats(df_pb_strats)
+                                        db_update("nexus_pb_strats", {'ID': strat['ID'], 'Protocols': '[]'})
                                         st.rerun()
                             st.divider()
 
@@ -2989,8 +3022,7 @@ elif page == "📘 STRATEGY BOARD":
                             'Title': l_title, 'Image': img_name, 'VideoLink': l_vid,
                             'Description': l_desc, 'Tags': "", 'CreatedBy': st.session_state.get('username', 'Unknown')
                         }
-                        updated = pd.concat([df_lineups, pd.DataFrame([new_lu])], ignore_index=True)
-                        save_lineups(updated)
+                        db_insert("nexus_lineups", new_lu)
                         st.success("Lineup saved!")
                         
                         # Manual Clear
@@ -3027,7 +3059,7 @@ elif page == "📘 STRATEGY BOARD":
                         if row['Description']: st.info(row['Description'])
                         
                         if st.button("🗑️", key=f"del_lu_{row['ID']}"):
-                            save_lineups(df_lineups[df_lineups['ID'] != row['ID']])
+                            db_delete("nexus_lineups", row['ID'])
                             st.rerun()
         else:
             st.info("No lineups found.")
@@ -3060,8 +3092,7 @@ elif page == "📘 STRATEGY BOARD":
                         nr = {'Map': pm, 'Name': pn, 'Link': pl}
                         for i in range(5): nr[f'Agent_{i+1}'] = mas[i]
                         
-                        updated = pd.concat([pb_df, pd.DataFrame([nr])], ignore_index=True)
-                        save_legacy_playbooks(updated)
+                        db_insert("playbooks", nr)
                         st.success("Link saved!")
                         
                         # Manual Clear
@@ -3126,8 +3157,7 @@ elif page == "📘 STRATEGY BOARD":
                         with c_action:
                             st.link_button("🔗 OPEN", row['Link'], use_container_width=True)
                             if st.button("🗑️", key=f"del_link_{idx}"):
-                                pb_df = pb_df.drop(idx)
-                                save_legacy_playbooks(pb_df)
+                                db_delete("playbooks", row['ID'])
                                 st.rerun()
                         
                         st.markdown("---")
@@ -3145,8 +3175,7 @@ elif page == "📚 RESOURCES":
         with st.form("ra"):
             rt = st.text_input("Title", key="res_title"); rl = st.text_input("Link", key="res_link"); rc = st.selectbox("Cat", ["Theory", "Lineups", "Setup", "Playbook Theory"], key="res_cat"); rn = st.text_area("Note", key="res_note")
             if st.form_submit_button("Save"):
-                updated = pd.concat([df_res, pd.DataFrame([{'Title': rt, 'Link': rl, 'Category': rc, 'Note': rn}])], ignore_index=True)
-                save_resources(updated)
+                db_insert("resources", {'Title': rt, 'Link': rl, 'Category': rc, 'Note': rn})
                 # Manual Clear
                 for k in ["res_title", "res_link", "res_note"]:
                     if k in st.session_state: del st.session_state[k]
@@ -3246,8 +3275,7 @@ elif page == "📅 CALENDAR":
                 
                 if st.form_submit_button("Add"):
                     p_str = ", ".join(cp)
-                    updated = pd.concat([df_cal, pd.DataFrame([{'Date':cd.strftime("%d.%m.%Y"),'Time':ct.strftime("%H:%M"),'Event':ce,'Map':cm,'Type':cty,'Players':p_str}])], ignore_index=True)
-                    save_calendar(updated)
+                    db_insert("calendar", {'Date':cd.strftime("%d.%m.%Y"),'Time':ct.strftime("%H:%M"),'Event':ce,'Map':cm,'Type':cty,'Players':p_str})
                     # Manual Clear
                     for k in ["cal_name", "cal_map", "cal_players"]:
                         if k in st.session_state: del st.session_state[k]
@@ -4197,16 +4225,10 @@ elif page == "📹 VOD REVIEW":
                     }
                     
                     if is_new:
-                        updated = pd.concat([df_vods, pd.DataFrame([save_data])], ignore_index=True)
+                        db_insert("nexus_vod_reviews", save_data)
                     else:
-                        # Update existing
-                        df_vods_new = df_vods.copy()
-                        idx_to_update = df_vods_new[df_vods_new['ID'] == row['ID']].index
-                        for k, v in save_data.items():
-                            df_vods_new.loc[idx_to_update, k] = v
-                        updated = df_vods_new
+                        db_update("nexus_vod_reviews", save_data)
                     
-                    save_vod_reviews(updated)
                     st.success("Saved!")
                     if is_new:
                         st.session_state.active_vod_id = save_data['ID'] # Switch to edit mode
@@ -4325,14 +4347,13 @@ elif page == "📹 VOD REVIEW":
                                 'Description': f"Exported from VOD: {row['Title']}", 'Tags': "VOD Export", 
                                 'CreatedBy': current_user
                             }
-                            updated_lu = pd.concat([df_lineups, pd.DataFrame([new_lu])], ignore_index=True)
-                            save_lineups(updated_lu)
+                            db_insert("nexus_lineups", new_lu)
                             st.success(f"Exported to Lineup Library!")
 
         # Delete Button (Bottom)
         if not is_new:
             if st.button("🗑️ Delete Review", key="del_wk"):
-                save_vod_reviews(df_vods[df_vods['ID'] != row['ID']])
+                db_delete("nexus_vod_reviews", row['ID'])
                 st.session_state.active_vod_id = None
                 st.rerun()
 
