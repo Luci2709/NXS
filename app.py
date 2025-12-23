@@ -687,6 +687,35 @@ PLAYER_DISCORD_MAPPING = {
     "Remus": "<@293790883420045314>"
 }
 
+# --- ABILITY MAPPING DATABASE (MOVED TO GLOBAL SCOPE) ---
+AGENT_ABILITIES = {
+    "Astra": {"C": "Gravity Well", "Q": "Nova Pulse", "E": "Nebula", "X": "Astral Form"},
+    "Breach": {"C": "Aftershock", "Q": "Flashpoint", "E": "Fault Line", "X": "Rolling Thunder"},
+    "Brimstone": {"C": "Stim Beacon", "Q": "Incendiary", "E": "Sky Smoke", "X": "Orbital Strike"},
+    "Chamber": {"C": "Trademark", "Q": "Headhunter", "E": "Rendezvous", "X": "Tour De Force"},
+    "Clove": {"C": "Pick-me-up", "Q": "Meddle", "E": "Ruse", "X": "Not Dead Yet"},
+    "Cypher": {"C": "Trapwire", "Q": "Cyber Cage", "E": "Spycam", "X": "Neural Theft"},
+    "Deadlock": {"C": "GravNet", "Q": "Sonic Sensor", "E": "Barrier Mesh", "X": "Annihilation"},
+    "Fade": {"C": "Prowler", "Q": "Seize", "E": "Haunt", "X": "Nightfall"},
+    "Gekko": {"C": "Mosh Pit", "Q": "Wingman", "E": "Dizzy", "X": "Thrash"},
+    "Harbor": {"C": "Cascade", "Q": "Cove", "E": "High Tide", "X": "Reckoning"},
+    "Iso": {"C": "Contingency", "Q": "Undercut", "E": "Double Tap", "X": "Kill Contract"},
+    "Jett": {"C": "Cloudburst", "Q": "Updraft", "E": "Tailwind", "X": "Blade Storm"},
+    "KAY/O": {"C": "FRAG/ment", "Q": "FLASH/drive", "E": "ZERO/point", "X": "NULL/cmd"},
+    "Killjoy": {"C": "Nanoswarm", "Q": "Alarmbot", "E": "Turret", "X": "Lockdown"},
+    "Neon": {"C": "Fast Lane", "Q": "Relay Bolt", "E": "High Gear", "X": "Overdrive"},
+    "Omen": {"C": "Shrouded Step", "Q": "Paranoia", "E": "Dark Cover", "X": "From the Shadows"},
+    "Phoenix": {"C": "Blaze", "Q": "Curveball", "E": "Hot Hands", "X": "Run it Back"},
+    "Raze": {"C": "Boom Bot", "Q": "Blast Pack", "E": "Paint Shells", "X": "Showstopper"},
+    "Reyna": {"C": "Leer", "Q": "Devour", "E": "Dismiss", "X": "Empress"},
+    "Sage": {"C": "Barrier Orb", "Q": "Slow Orb", "E": "Healing Orb", "X": "Resurrection"},
+    "Skye": {"C": "Regrowth", "Q": "Trailblazer", "E": "Guiding Light", "X": "Seekers"},
+    "Sova": {"C": "Owl Drone", "Q": "Shock Bolt", "E": "Recon Bolt", "X": "Hunter's Fury"},
+    "Viper": {"C": "Snake Bite", "Q": "Poison Cloud", "E": "Toxic Screen", "X": "Viper's Pit"},
+    "Vyse": {"C": "Razorvine", "Q": "Shear", "E": "Arc Rose", "X": "Steel Garden"},
+    "Yoru": {"C": "Fakeout", "Q": "Blindside", "E": "Gatecrash", "X": "Dimensional Drift"},
+}
+
 def send_discord_notification(player_name, task_title, description):
     ping = PLAYER_DISCORD_MAPPING.get(player_name, player_name)
     content = f"📢 **New Task Assigned!**\n\n👤 **Player:** {ping}\n📝 **Task:** {task_title}\nℹ️ **Details:** {description}\n\n_Check the Nexus Dashboard (https://nxs-dashboard.streamlit.app) for more info._"
@@ -3019,7 +3048,14 @@ elif page == "📘 STRATEGY BOARD":
                 
                 c3, c4 = st.columns(2)
                 l_side = c3.selectbox("Side", ["Attack", "Defense"], key="lu_side")
-                l_type = c4.selectbox("Type", ["Recon", "Shock", "Molly", "Flash", "Smoke", "Wall", "Ult", "One-Way"], key="lu_type")
+                
+                # Dynamic Ability Select
+                avail_abils = AGENT_ABILITIES.get(l_agent, {})
+                abil_opts = [f"{k}: {v}" for k, v in avail_abils.items()] if avail_abils else ["Default"]
+                l_ability = c4.selectbox("Ability", abil_opts, key="lu_abil")
+                
+                # Extra Tags (formerly Type)
+                l_tags = st.multiselect("Tags / Type", ["Recon", "Shock", "Molly", "Flash", "Smoke", "Wall", "Ult", "One-Way", "God Spot", "Retake"], key="lu_tags")
                 
                 l_title = st.text_input("Title", placeholder="e.g. B Main God Arrow", key="lu_title")
                 l_desc = st.text_area("Description / Instructions", key="lu_desc")
@@ -3045,11 +3081,15 @@ elif page == "📘 STRATEGY BOARD":
                             img_name = f"LU_{uuid.uuid4().hex[:8]}.png"
                             with open(os.path.join(STRAT_IMG_DIR, img_name), "wb") as f: f.write(img_data)
                         
+                        # Clean Ability Name (remove "C: " prefix)
+                        final_type = l_ability.split(": ")[1] if ": " in l_ability else l_ability
+                        final_tags = ", ".join(l_tags)
+                        
                         new_lu = {
                             'ID': str(uuid.uuid4())[:8],
-                            'Map': l_map, 'Agent': l_agent, 'Side': l_side, 'Type': l_type,
+                            'Map': l_map, 'Agent': l_agent, 'Side': l_side, 'Type': final_type,
                             'Title': l_title, 'Image': img_name, 'VideoLink': l_vid,
-                            'Description': l_desc, 'Tags': "", 'CreatedBy': st.session_state.get('username', 'Unknown')
+                            'Description': l_desc, 'Tags': final_tags, 'CreatedBy': st.session_state.get('username', 'Unknown')
                         }
                         db_insert("nexus_lineups", new_lu, "df_lineups")
                         st.success("Lineup saved!")
@@ -3443,6 +3483,12 @@ elif page == "📊 PLAYERS":
                 for c in ['ADR', 'FK', 'FD']:
                     if c not in df_filtered.columns: df_filtered[c] = 0
 
+                # Ensure numeric columns for aggregation to avoid TypeErrors
+                num_cols = ['Kills', 'Deaths', 'Assists', 'Score', 'Rounds', 'HS', 'ADR', 'FK', 'FD']
+                for col in num_cols:
+                    if col in df_filtered.columns:
+                        df_filtered[col] = pd.to_numeric(df_filtered[col], errors='coerce').fillna(0)
+
                 p_agg = df_filtered.groupby('Player').agg({
                     'MatchID': 'nunique', 
                     'Kills': 'sum', 
@@ -3573,35 +3619,6 @@ elif page == "📊 PLAYERS":
                         st.plotly_chart(fig, use_container_width=True)
 
     with tab_deep:
-        # --- ABILITY MAPPING DATABASE ---
-        AGENT_ABILITIES = {
-            "Astra": {"C": "Gravity Well", "Q": "Nova Pulse", "E": "Nebula", "X": "Astral Form"},
-            "Breach": {"C": "Aftershock", "Q": "Flashpoint", "E": "Fault Line", "X": "Rolling Thunder"},
-            "Brimstone": {"C": "Stim Beacon", "Q": "Incendiary", "E": "Sky Smoke", "X": "Orbital Strike"},
-            "Chamber": {"C": "Trademark", "Q": "Headhunter", "E": "Rendezvous", "X": "Tour De Force"},
-            "Clove": {"C": "Pick-me-up", "Q": "Meddle", "E": "Ruse", "X": "Not Dead Yet"},
-            "Cypher": {"C": "Trapwire", "Q": "Cyber Cage", "E": "Spycam", "X": "Neural Theft"},
-            "Deadlock": {"C": "GravNet", "Q": "Sonic Sensor", "E": "Barrier Mesh", "X": "Annihilation"},
-            "Fade": {"C": "Prowler", "Q": "Seize", "E": "Haunt", "X": "Nightfall"},
-            "Gekko": {"C": "Mosh Pit", "Q": "Wingman", "E": "Dizzy", "X": "Thrash"},
-            "Harbor": {"C": "Cascade", "Q": "Cove", "E": "High Tide", "X": "Reckoning"},
-            "Iso": {"C": "Contingency", "Q": "Undercut", "E": "Double Tap", "X": "Kill Contract"},
-            "Jett": {"C": "Cloudburst", "Q": "Updraft", "E": "Tailwind", "X": "Blade Storm"},
-            "KAY/O": {"C": "FRAG/ment", "Q": "FLASH/drive", "E": "ZERO/point", "X": "NULL/cmd"},
-            "Killjoy": {"C": "Nanoswarm", "Q": "Alarmbot", "E": "Turret", "X": "Lockdown"},
-            "Neon": {"C": "Fast Lane", "Q": "Relay Bolt", "E": "High Gear", "X": "Overdrive"},
-            "Omen": {"C": "Shrouded Step", "Q": "Paranoia", "E": "Dark Cover", "X": "From the Shadows"},
-            "Phoenix": {"C": "Blaze", "Q": "Curveball", "E": "Hot Hands", "X": "Run it Back"},
-            "Raze": {"C": "Boom Bot", "Q": "Blast Pack", "E": "Paint Shells", "X": "Showstopper"},
-            "Reyna": {"C": "Leer", "Q": "Devour", "E": "Dismiss", "X": "Empress"},
-            "Sage": {"C": "Barrier Orb", "Q": "Slow Orb", "E": "Healing Orb", "X": "Resurrection"},
-            "Skye": {"C": "Regrowth", "Q": "Trailblazer", "E": "Guiding Light", "X": "Seekers"},
-            "Sova": {"C": "Owl Drone", "Q": "Shock Bolt", "E": "Recon Bolt", "X": "Hunter's Fury"},
-            "Viper": {"C": "Snake Bite", "Q": "Poison Cloud", "E": "Toxic Screen", "X": "Viper's Pit"},
-            "Vyse": {"C": "Razorvine", "Q": "Shear", "E": "Arc Rose", "X": "Steel Garden"},
-            "Yoru": {"C": "Fakeout", "Q": "Blindside", "E": "Gatecrash", "X": "Dimensional Drift"},
-        }
-        
         # --- ROLE MAPPING ---
         AGENT_ROLES = {
             "Duelist": ["Jett", "Phoenix", "Reyna", "Raze", "Yoru", "Neon", "Iso"],
@@ -4106,30 +4123,6 @@ elif page == "📹 VOD REVIEW":
             curr_time_str = fmt_timer(get_timer_seconds())
             c_t3.metric("Timer", curr_time_str, label_visibility="collapsed")
 
-            # Quick Actions
-            st.caption("Quick Log (Auto-Timestamp)")
-            qa1, qa2, qa3, qa4 = st.columns(4)
-            
-            def append_log(text):
-                ts = fmt_timer(get_timer_seconds())
-                line = f"**{ts}** - {text}"
-                
-                if mode == "📝 General Notes":
-                    current = st.session_state.get('wk_notes_temp', row['Notes'])
-                    st.session_state.wk_notes_temp = (current + "\n" + line).strip()
-                else:
-                    # Append to current round notes
-                    ridx = st.session_state.get('curr_round_idx', 0)
-                    if rounds_data and ridx < len(rounds_data):
-                        curr_r_notes = rounds_data[ridx].get('Notes', '')
-                        rounds_data[ridx]['Notes'] = (curr_r_notes + "\n" + line).strip()
-                        st.session_state['wk_rounds_temp'] = rounds_data # Sync
-            
-            if qa1.button("💀 Death"): append_log("Death")
-            if qa2.button("🔫 Kill"): append_log("Kill")
-            if qa3.button("🗣️ Comms"): append_log("Comms Issue")
-            if qa4.button("🧠 Macro"): append_log("Macro Mistake")
-
             # 2. NOTES EDITOR
             st.markdown("#### 📝 Analysis")
             st.divider()
@@ -4234,7 +4227,7 @@ elif page == "📹 VOD REVIEW":
                     st.session_state.wk_rounds_temp = curr_rounds
 
             # 3. SAVE BUTTON
-            if c_save.button("💾 SAVE CHANGES", type="primary", use_container_width=True):
+            if c_save.button("💾 SAVE & CLOSE", type="primary", use_container_width=True):
                 if not new_title:
                     st.error("Title required")
                 else:
@@ -4260,7 +4253,7 @@ elif page == "📹 VOD REVIEW":
                     
                     st.success("Saved!")
                     if is_new:
-                        st.session_state.active_vod_id = save_data['ID'] # Switch to edit mode
+                        st.session_state.active_vod_id = None # Return to library
                         st.rerun()
 
             # 4. TIMESTAMPS LIST (Clickable)
@@ -4298,6 +4291,7 @@ elif page == "📹 VOD REVIEW":
                                         h_size = int((float(img.size[1]) * float(w_percent)))
                                         img = img.resize((base_width, h_size), Image.Resampling.LANCZOS)
                                         st.session_state['ts_bg_wk'] = img
+                                        st.session_state['ts_bg_id'] = st.session_state.get('ts_bg_id', 0) + 1
                                         st.rerun()
                                     except Exception as e: st.error(f"Error: {e}")
                             
@@ -4315,7 +4309,7 @@ elif page == "📹 VOD REVIEW":
                                     fill_color="rgba(255, 165, 0, 0.1)", stroke_width=stroke, stroke_color=color,
                                     background_image=st.session_state[ts_key_bg], update_streamlit=True,
                                     height=st.session_state[ts_key_bg].height, width=st.session_state[ts_key_bg].width,
-                                    drawing_mode=mode, key=f"canvas_wk",
+                                    drawing_mode=mode, key=f"canvas_wk_{st.session_state.get('ts_bg_id', 0)}",
                                 )
                                 
                                 if st.button("💾 Save Analysis to Notes", key=f"save_ts_wk"):
