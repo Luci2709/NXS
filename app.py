@@ -866,7 +866,12 @@ def _bg_save(worksheet, data):
         conn.update(worksheet=worksheet, data=data)
         st.cache_data.clear()
     except Exception as e:
-        print(f"Background Save Error ({worksheet}): {e}")
+        # Fallback: Versuche das Worksheet zu erstellen, falls Update fehlschlägt (z.B. weil es noch nicht existiert)
+        try:
+            conn.create(worksheet=worksheet, data=data)
+            st.cache_data.clear()
+        except Exception as e2:
+            print(f"Background Save Error ({worksheet}): {e} | Create Error: {e2}")
 
 def save_matches(df_new):
     threading.Thread(target=_bg_save, args=("nexus_matches", df_new)).start()
