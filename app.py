@@ -92,7 +92,7 @@ USER_CREDENTIALS = {
     # Players - all except database and match entry
     "Luggi": {"password": "1", "role": "player"},
     "Andrei": {"password": "player123", "role": "player"},
-    "Benni": {"password": "player123", "role": "player"},
+    "Benni": {"password": "Valorant2026", "role": "player"},
     "Sofi": {"password": "player123", "role": "player"},
     "Luca": {"password": "player123", "role": "player"},
     "Remus": {"password": "player123", "role": "player"},
@@ -3932,224 +3932,280 @@ elif page == "📹 VOD REVIEW":
     
     # Current User
     current_user = st.session_state.get('username', 'Unknown')
+
+    # --- STATE MANAGEMENT FOR VOD WORKSPACE ---
+    if 'active_vod_id' not in st.session_state: st.session_state.active_vod_id = None
+    if 'vod_timer_running' not in st.session_state: st.session_state.vod_timer_running = False
+    if 'vod_timer_start' not in st.session_state: st.session_state.vod_timer_start = 0
+    if 'vod_timer_offset' not in st.session_state: st.session_state.vod_timer_offset = 0
+
+    def get_timer_seconds():
+        if st.session_state.vod_timer_running:
+            return st.session_state.vod_timer_offset + (time.time() - st.session_state.vod_timer_start)
+        return st.session_state.vod_timer_offset
+
+    def fmt_timer(seconds):
+        m = int(seconds // 60)
+        s = int(seconds % 60)
+        return f"{m}:{s:02d}"
     
-    tab_new, tab_lib = st.tabs(["➕ NEW REVIEW", "📂 REVIEW LIBRARY"])
-    
-    with tab_new:
-        st.markdown("### 📝 Create New Analysis")
-        st.caption("Watch a VOD and take notes simultaneously. Supports YouTube, Twitch, and direct video links.")
+    # --- VIEW 1: LIBRARY (GRID) ---
+    if st.session_state.active_vod_id is None:
+        c_head, c_act = st.columns([3, 1])
+        c_head.markdown("### 📂 VOD LIBRARY")
         
-        # Session State for Notes (to allow appending images)
-        if 'new_vod_notes' not in st.session_state: st.session_state.new_vod_notes = ""
-
-        # 1. Video Link (Outside Form for interactivity)
-        v_link = st.text_input("Video Link (Paste here to load video)", placeholder="https://www.youtube.com/watch?v=...", key="vod_link_input")
-
-        # 2. Paste Button (Outside Form)
-        if HAS_CLIPBOARD:
-            pasted_data = paste(label="📋 Paste Screenshot to Notes", key="new_vod_paste")
-            if pasted_data:
-                try:
-                    if isinstance(pasted_data, str) and "," in pasted_data: pasted_data = pasted_data.split(",")[1]
-                    img_bytes = base64.b64decode(pasted_data)
-                    fname = f"VOD_SNAP_{uuid.uuid4().hex[:8]}.png"
-                    with open(os.path.join(VOD_IMG_DIR, fname), "wb") as f: f.write(img_bytes)
-                    st.session_state.new_vod_notes += f"\n[[img:{fname}]]\n"
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Paste Error: {e}")
-
-        # 3. Form for Data Entry & Saving
-        with st.form("new_vod_form"):
-            c1, c2 = st.columns(2)
-            with c1:
-                v_title = st.text_input("Title", placeholder="e.g. FNATIC vs LOUD - Lotus Analysis")
-                v_type = st.selectbox("Type", ["Own Gameplay", "Pro Match", "Scrim Review", "Other"])
-            with c2:
-                v_map = st.selectbox("Map", sorted(df['Map'].unique()) if not df.empty else ["Ascent"])
-                c_sub1, c_sub2 = st.columns(2)
-                p_opts = ["None"] + ["Luggi","Benni","Andrei","Luca","Sofi","Remus"]
-                v_player = c_sub1.selectbox("Player", p_opts)
-                a_opts = ["None"] + sorted(df_players['Agent'].unique().tolist()) if not df_players.empty else ["None"]
-                v_agent = c_sub2.selectbox("Agent", a_opts)
-
-            st.markdown("---")
-            c_vid, c_note = st.columns([1.6, 1])
-            
-            with c_vid:
-                if v_link: st.video(v_link)
-                else: st.info("📺 Enter a Video Link above to watch here.")
-            
-            with c_note:
-                st.markdown("### 📝 Notes")
-                v_notes = st.text_area("Content", value=st.session_state.new_vod_notes, height=400, key="form_vod_notes")
-                v_tags = st.multiselect("Tags", ["Macro", "Micro", "Comms", "Utility", "Clutch", "Entry", "Retake", "Setup", "IGL"])
-                
-                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-                submitted = st.form_submit_button("💾 Save Review", type="primary", use_container_width=True)
-
-            if submitted:
-                # Update session state just in case
-                st.session_state.new_vod_notes = v_notes
-                
-                if not v_title or not v_link:
-                    st.error("Title and Video Link are required.")
-                else:
-                    new_id = str(uuid.uuid4())[:8]
-                    new_review = {
-                        'ID': new_id,
-                        'Title': v_title,
-                        'Type': v_type,
-                        'VideoLink': v_link,
-                        'Map': v_map,
-                        'Agent': v_agent if v_agent != "None" else "",
-                        'Player': v_player if v_player != "None" else "",
-                        'Notes': v_notes,
-                        'Tags': ", ".join(v_tags),
-                        'CreatedBy': current_user,
-                        'CreatedAt': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    updated = pd.concat([df_vods, pd.DataFrame([new_review])], ignore_index=True)
-                    save_vod_reviews(updated)
-                    st.success("Review saved! Go to 'Review Library' to watch and edit.")
-                    # Reset
-                    st.session_state.new_vod_notes = ""
+        with c_act:
+            if st.button("➕ NEW REVIEW", use_container_width=True, type="primary"):
+                st.session_state.active_vod_id = "NEW"
+                st.rerun()
+            # Repair Button if loading fails
+            if df_vods.empty:
+                if st.button("🔧 Initialize Database", help="Click this if loading fails or list is empty"):
+                    save_vod_reviews(pd.DataFrame(columns=['ID', 'Title', 'Type', 'VideoLink', 'Map', 'Agent', 'Player', 'Notes', 'Tags', 'CreatedBy', 'CreatedAt']))
+                    st.success("Database initialized! Reloading...")
+                    time.sleep(1)
                     st.rerun()
 
-    with tab_lib:
-        if df_vods.empty:
-            st.info("No reviews found. Create one in the 'New Review' tab.")
-        else:
+        if not df_vods.empty:
             # Filters
-            c_s, c_f1, c_f2, c_f3 = st.columns([1.5, 1, 1, 1])
+            c_s, c_f1, c_f2, c_f3 = st.columns([2, 1, 1, 1])
             search_q = c_s.text_input("🔍 Search", placeholder="Title, Notes, Tags...")
             f_map = c_f1.multiselect("Map", df_vods['Map'].unique())
             f_type = c_f2.multiselect("Type", df_vods['Type'].unique())
             f_player = c_f3.multiselect("Player", df_vods['Player'].unique())
             
             view_df = df_vods.copy()
-            
             if search_q:
                 q = search_q.lower()
                 view_df = view_df[view_df.apply(lambda x: q in str(x['Title']).lower() or q in str(x['Notes']).lower() or q in str(x['Tags']).lower(), axis=1)]
-            
             if f_map: view_df = view_df[view_df['Map'].isin(f_map)]
             if f_type: view_df = view_df[view_df['Type'].isin(f_type)]
             if f_player: view_df = view_df[view_df['Player'].isin(f_player)]
             
-            st.markdown(f"**Showing {len(view_df)} Reviews**")
-            
+            # Grid Layout
+            cols = st.columns(3)
             for idx, row in view_df.sort_values('CreatedAt', ascending=False).iterrows():
-                with st.expander(f"📹 {row['Title']} ({row['Map']}) - {row['Type']}", expanded=False):
-                    c_v, c_n = st.columns([1.5, 1])
-                    
-                    with c_v:
-                        # Timestamp Logic
-                        start_key = f"vod_start_{row['ID']}"
-                        if start_key not in st.session_state: st.session_state[start_key] = 0
+                with cols[idx % 3]:
+                    with st.container(border=True):
+                        # Thumbnail / Map Image
+                        map_img = get_map_img(row['Map'], 'list')
+                        if map_img: st.image(map_img, use_container_width=True)
                         
-                        st.video(row['VideoLink'], start_time=st.session_state[start_key])
-                        st.caption(f"Created by {row['CreatedBy']} on {row['CreatedAt']}")
-                        if row['Tags']: st.markdown(f"**Tags:** `{row['Tags']}`")
+                        st.markdown(f"**{row['Title']}**")
+                        st.caption(f"{row['Type']} • {row['Map']} • {row['CreatedAt'][:10]}")
+                        if row['Tags']: st.caption(f"🏷️ {row['Tags']}")
                         
-                        # Extract timestamps from notes
-                        if row['Notes']:
-                            ts_matches = re.findall(r"\b(\d{1,2}:\d{2}(?::\d{2})?)\b", row['Notes'])
-                            if ts_matches:
-                                st.markdown("**⏱️ Jump to Timestamp:**")
-                                unique_ts = sorted(list(set(ts_matches)), key=lambda x: [int(t) for t in x.split(':')])
-                                cols_ts = st.columns(6)
-                                for i, ts in enumerate(unique_ts):
-                                    parts = list(map(int, ts.split(':')))
-                                    sec = 0
-                                    if len(parts)==2: sec = parts[0]*60 + parts[1]
-                                    elif len(parts)==3: sec = parts[0]*3600 + parts[1]*60 + parts[2]
-                                    
-                                    if cols_ts[i%6].button(ts, key=f"ts_{row['ID']}_{ts}_{i}"):
-                                        st.session_state[start_key] = sec
-                                        st.rerun()
-                    
-                    with c_n:
-                        st.markdown("### 📝 Notes")
-                        
-                        # Edit Mode
-                        edit_key = f"edit_vod_{row['ID']}"
-                        if edit_key not in st.session_state: st.session_state[edit_key] = False
-                        
-                        if st.session_state[edit_key]:
-                            # Edit Mode with Paste
-                            if HAS_CLIPBOARD:
-                                p_edit = paste(label="📋 Paste Image", key=f"paste_edit_{row['ID']}")
-                                if p_edit:
-                                    try:
-                                        if isinstance(p_edit, str) and "," in p_edit: p_edit = p_edit.split(",")[1]
-                                        ib = base64.b64decode(p_edit)
-                                        fn = f"VOD_SNAP_{uuid.uuid4().hex[:8]}.png"
-                                        with open(os.path.join(VOD_IMG_DIR, fn), "wb") as f: f.write(ib)
-                                        
-                                        # Append to current notes in text area (requires rerun to update value)
-                                        # We can't easily update the widget value directly without session state binding
-                                        # But we can update the dataframe temporarily or just show a message to copy code
-                                        st.info(f"Image saved! Add this tag to your notes: [[img:{fn}]]")
-                                    except: pass
+                        if st.button("▶️ OPEN REVIEW", key=f"open_{row['ID']}", use_container_width=True):
+                            st.session_state.active_vod_id = row['ID']
+                            st.rerun()
+        else:
+            st.info("No reviews found. Click 'NEW REVIEW' to start.")
 
-                            new_notes = st.text_area("Edit Notes", value=row['Notes'], height=400, key=f"edit_area_{row['ID']}")
-                            c_s, c_c = st.columns(2)
-                            if c_s.button("💾 Save", key=f"save_{row['ID']}"):
-                                df_vods.loc[df_vods['ID'] == row['ID'], 'Notes'] = new_notes
-                                save_vod_reviews(df_vods)
-                                st.session_state[edit_key] = False
-                                st.success("Saved!")
-                                st.rerun()
-                            if c_c.button("❌ Cancel", key=f"cancel_{row['ID']}"):
-                                st.session_state[edit_key] = False
-                                st.rerun()
-                        else:
-                            render_rich_notes(row['Notes'])
-                            if st.button("✏️ Edit Notes", key=f"edit_btn_{row['ID']}"):
-                                st.session_state[edit_key] = True
-                                st.rerun()
+    # --- VIEW 2: WORKSPACE (VALOLENS STYLE) ---
+    else:
+        # Load Active Review Data
+        is_new = st.session_state.active_vod_id == "NEW"
+        
+        if is_new:
+            row = {'ID': 'NEW', 'Title': '', 'Type': 'Own Gameplay', 'VideoLink': '', 'Map': 'Ascent', 'Player': '', 'Agent': '', 'Notes': '', 'Tags': ''}
+        else:
+            row = df_vods[df_vods['ID'] == st.session_state.active_vod_id].iloc[0]
+
+        # Header
+        c_back, c_title, c_save = st.columns([1, 4, 1])
+        if c_back.button("⬅ BACK"):
+            st.session_state.active_vod_id = None
+            st.rerun()
+        
+        with c_title:
+            if is_new: st.markdown("### 🆕 Creating New Review")
+            else: st.markdown(f"### 📹 {row['Title']}")
+
+        # --- LAYOUT ---
+        col_video, col_tools = st.columns([2, 1])
+
+        # --- LEFT: VIDEO PLAYER ---
+        with col_video:
+            # Video Link Input (Always visible for editing)
+            v_link = st.text_input("Video Link", value=row['VideoLink'], key="wk_vlink", placeholder="Paste YouTube/Twitch link...")
+            
+            # Video Player
+            start_time = 0
+            if f"seek_{row['ID']}" in st.session_state:
+                start_time = st.session_state[f"seek_{row['ID']}"]
+                del st.session_state[f"seek_{row['ID']}"] # Consume event
+            
+            if v_link:
+                st.video(v_link, start_time=start_time)
+            else:
+                st.info("📺 Video will appear here.")
+            
+            # Metadata Inputs
+            with st.expander("📝 Metadata & Settings", expanded=is_new):
+                c1, c2 = st.columns(2)
+                new_title = c1.text_input("Title", value=row['Title'], key="wk_title")
+                new_map = c2.selectbox("Map", sorted(df['Map'].unique()), index=sorted(df['Map'].unique()).index(row['Map']) if row['Map'] in df['Map'].unique() else 0, key="wk_map")
+                c3, c4 = st.columns(2)
+                new_type = c3.selectbox("Type", ["Own Gameplay", "Pro Match", "Scrim Review"], index=["Own Gameplay", "Pro Match", "Scrim Review"].index(row['Type']) if row['Type'] in ["Own Gameplay", "Pro Match", "Scrim Review"] else 0, key="wk_type")
+                new_tags = c4.multiselect("Tags", ["Macro", "Micro", "Comms", "Utility", "Clutch", "IGL"], default=row['Tags'].split(", ") if row['Tags'] else [], key="wk_tags")
+
+        # --- RIGHT: TOOLS & LOGGING ---
+        with col_tools:
+            # 1. LIVE LOGGING TIMER
+            st.markdown("#### ⏱️ Live Logger")
+            c_t1, c_t2, c_t3 = st.columns([1, 1, 2])
+            
+            # Timer Controls
+            if st.session_state.vod_timer_running:
+                if c_t1.button("⏸️ Pause"):
+                    st.session_state.vod_timer_offset += time.time() - st.session_state.vod_timer_start
+                    st.session_state.vod_timer_running = False
+                    st.rerun()
+            else:
+                if c_t1.button("▶️ Start"):
+                    st.session_state.vod_timer_start = time.time()
+                    st.session_state.vod_timer_running = True
+                    st.rerun()
+            
+            if c_t2.button("🔄 Reset"):
+                st.session_state.vod_timer_running = False
+                st.session_state.vod_timer_offset = 0
+                st.rerun()
+            
+            curr_time_str = fmt_timer(get_timer_seconds())
+            c_t3.metric("Timer", curr_time_str, label_visibility="collapsed")
+
+            # Quick Actions
+            st.caption("Quick Log (Auto-Timestamp)")
+            qa1, qa2, qa3, qa4 = st.columns(4)
+            
+            def append_log(text):
+                ts = fmt_timer(get_timer_seconds())
+                line = f"**{ts}** - {text}\n"
+                # Append to session state notes
+                current = st.session_state.get('wk_notes_temp', row['Notes'])
+                st.session_state.wk_notes_temp = (current + "\n" + line).strip()
+            
+            if qa1.button("💀 Death"): append_log("Death")
+            if qa2.button("🔫 Kill"): append_log("Kill")
+            if qa3.button("🗣️ Comms"): append_log("Comms Issue")
+            if qa4.button("🧠 Macro"): append_log("Macro Mistake")
+
+            # 2. NOTES EDITOR
+            st.markdown("#### 📝 Analysis")
+            
+            # Initialize temp notes in session state if not present
+            if 'wk_notes_temp' not in st.session_state:
+                st.session_state.wk_notes_temp = row['Notes']
+
+            # Paste Image Button
+            if HAS_CLIPBOARD:
+                p_edit = paste(label="📋 Paste Image", key="wk_paste")
+                if p_edit:
+                    try:
+                        if isinstance(p_edit, str) and "," in p_edit: p_edit = p_edit.split(",")[1]
+                        ib = base64.b64decode(p_edit)
+                        fn = f"VOD_SNAP_{uuid.uuid4().hex[:8]}.png"
+                        with open(os.path.join(VOD_IMG_DIR, fn), "wb") as f: f.write(ib)
+                        st.session_state.wk_notes_temp += f"\n[[img:{fn}]]\n"
+                        st.rerun()
+                    except: pass
+
+            notes_val = st.text_area("Notes", value=st.session_state.wk_notes_temp, height=400, key="wk_notes_area")
+            st.session_state.wk_notes_temp = notes_val # Sync back
+
+            # 3. SAVE BUTTON
+            if c_save.button("💾 SAVE CHANGES", type="primary", use_container_width=True):
+                if not new_title:
+                    st.error("Title required")
+                else:
+                    # Construct Data
+                    save_data = {
+                        'ID': row['ID'] if not is_new else str(uuid.uuid4())[:8],
+                        'Title': new_title,
+                        'Type': new_type,
+                        'VideoLink': v_link,
+                        'Map': new_map,
+                        'Agent': row['Agent'], # Keep existing or add selector
+                        'Player': row['Player'],
+                        'Notes': notes_val,
+                        'Tags': ", ".join(new_tags),
+                        'CreatedBy': row['CreatedBy'] if not is_new else current_user,
+                        'CreatedAt': row['CreatedAt'] if not is_new else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    
+                    if is_new:
+                        updated = pd.concat([df_vods, pd.DataFrame([save_data])], ignore_index=True)
+                    else:
+                        # Update existing
+                        df_vods_new = df_vods.copy()
+                        idx_to_update = df_vods_new[df_vods_new['ID'] == row['ID']].index
+                        for k, v in save_data.items():
+                            df_vods_new.loc[idx_to_update, k] = v
+                        updated = df_vods_new
+                    
+                    save_vod_reviews(updated)
+                    st.success("Saved!")
+                    if is_new:
+                        st.session_state.active_vod_id = save_data['ID'] # Switch to edit mode
+                        st.rerun()
+
+            # 4. TIMESTAMPS LIST (Clickable)
+            st.divider()
+            st.markdown("#### 📍 Timestamps")
+            if notes_val:
+                ts_matches = re.findall(r"\b(\d{1,2}:\d{2}(?::\d{2})?)\b", notes_val)
+                if ts_matches:
+                    unique_ts = sorted(list(set(ts_matches)), key=lambda x: [int(t) for t in x.split(':')])
+                    cols_ts = st.columns(4)
+                    for i, ts in enumerate(unique_ts):
+                        parts = list(map(int, ts.split(':')))
+                        sec = 0
+                        if len(parts)==2: sec = parts[0]*60 + parts[1]
+                        elif len(parts)==3: sec = parts[0]*3600 + parts[1]*60 + parts[2]
                         
-                        # --- TELESTRATOR (DRAWING) ---
-                        st.divider()
-                        with st.expander("🎨 Telestrator (Draw on Video Frame)"):
-                            st.caption("1. Pause Video ⏸️  2. Screenshot (Win+Shift+S) 📸  3. Paste below 📋  4. Draw & Save 💾")
-                            
-                            ts_key_bg = f"ts_bg_{row['ID']}"
-                            if ts_key_bg not in st.session_state: st.session_state[ts_key_bg] = None
-                            
-                            # Paste Button
+                        if cols_ts[i%4].button(ts, key=f"jump_{ts}"):
+                            st.session_state[f"seek_{row['ID']}"] = sec
+                            st.rerun()
+
+            # 5. TELESTRATOR
+            with st.expander("🎨 Telestrator"):
+                 # ... (Existing Telestrator Code reused) ...
+                 # Paste Button
                             if HAS_CLIPBOARD:
-                                p_ts = paste(label="📋 Paste Screenshot", key=f"paste_ts_{row['ID']}")
+                                p_ts = paste(label="📋 Paste Screenshot", key=f"paste_ts_wk")
                                 if p_ts:
                                     try:
                                         if isinstance(p_ts, str) and "," in p_ts: p_ts = p_ts.split(",")[1]
                                         ib = base64.b64decode(p_ts)
                                         img = Image.open(io.BytesIO(ib))
-                                        # Resize for canvas (max width 600 to fit column)
+                                        # Resize
                                         base_width = 600
                                         w_percent = (base_width / float(img.size[0]))
                                         h_size = int((float(img.size[1]) * float(w_percent)))
                                         img = img.resize((base_width, h_size), Image.Resampling.LANCZOS)
-                                        st.session_state[ts_key_bg] = img
+                                        st.session_state['ts_bg_wk'] = img
                                         st.rerun()
                                     except Exception as e: st.error(f"Error: {e}")
+                            
+                            ts_key_bg = 'ts_bg_wk'
+                            if ts_key_bg not in st.session_state: st.session_state[ts_key_bg] = None
                             
                             if st.session_state[ts_key_bg]:
                                 # Toolbar
                                 c_t1, c_t2, c_t3 = st.columns([1,1,1])
-                                mode = c_t1.selectbox("Tool", ["freedraw", "line", "rect", "circle"], key=f"tool_{row['ID']}")
-                                color = c_t2.color_picker("Color", "#00BFFF", key=f"col_{row['ID']}")
-                                stroke = c_t3.slider("Width", 1, 10, 3, key=f"wid_{row['ID']}")
+                                mode = c_t1.selectbox("Tool", ["freedraw", "line", "rect", "circle"], key=f"tool_wk")
+                                color = c_t2.color_picker("Color", "#00BFFF", key=f"col_wk")
+                                stroke = c_t3.slider("Width", 1, 10, 3, key=f"wid_wk")
                                 
                                 canvas_result = st_canvas(
                                     fill_color="rgba(255, 165, 0, 0.1)", stroke_width=stroke, stroke_color=color,
                                     background_image=st.session_state[ts_key_bg], update_streamlit=True,
                                     height=st.session_state[ts_key_bg].height, width=st.session_state[ts_key_bg].width,
-                                    drawing_mode=mode, key=f"canvas_{row['ID']}",
+                                    drawing_mode=mode, key=f"canvas_wk",
                                 )
                                 
-                                if st.button("💾 Save Analysis to Notes", key=f"save_ts_{row['ID']}"):
+                                if st.button("💾 Save Analysis to Notes", key=f"save_ts_wk"):
                                     if canvas_result.image_data is not None:
                                         bg = st.session_state[ts_key_bg].convert("RGBA")
                                         fg = Image.fromarray(canvas_result.image_data.astype('uint8'), "RGBA")
@@ -4158,16 +4214,15 @@ elif page == "📹 VOD REVIEW":
                                         fn = f"VOD_ANALY_{uuid.uuid4().hex[:8]}.png"
                                         final.save(os.path.join(VOD_IMG_DIR, fn))
                                         
-                                        df_vods.loc[df_vods['ID'] == row['ID'], 'Notes'] = (row['Notes'] if row['Notes'] else "") + f"\n\n**Analysis:**\n[[img:{fn}]]\n"
-                                        save_vod_reviews(df_vods)
+                                        st.session_state.wk_notes_temp += f"\n\n**Analysis:**\n[[img:{fn}]]\n"
                                         st.success("Saved to notes!"); st.rerun()
 
-                        st.divider()
-                        
-                        if st.button("🗑️ Delete Review", key=f"del_vod_{row['ID']}"):
-                            updated = df_vods[df_vods['ID'] != row['ID']]
-                            save_vod_reviews(updated)
-                            st.rerun()
+        # Delete Button (Bottom)
+        if not is_new:
+            if st.button("🗑️ Delete Review", key="del_wk"):
+                save_vod_reviews(df_vods[df_vods['ID'] != row['ID']])
+                st.session_state.active_vod_id = None
+                st.rerun()
 
 # ==============================================================================
 # 8. DATABASE
