@@ -234,64 +234,58 @@ st.markdown("""
 <style>
     /* --- GLOBAL THEME --- */
     .stApp { 
-        background-color: #050505; 
-        background-image: radial-gradient(circle at 50% 0%, #1a1a2e 0%, #050505 60%);
-        color: #e0e0e0; 
+        background-color: #0e1117;
+        color: #f0f2f6;
     }
     [data-testid="stSidebar"] { 
-        background-color: #080810;
-        border-right: 1px solid #333; 
+        background-color: #161b22;
+        border-right: 1px solid #30363d; 
     }
     
     /* --- TYPOGRAPHY & GRADIENTS --- */
     h1, h2, h3 {
-        background: linear-gradient(90deg, #00BFFF 0%, #FF1493 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-weight: 900 !important;
-        text-transform: uppercase;
-        font-family: 'Segoe UI', sans-serif;
-        letter-spacing: 1px;
+        color: #ffffff;
+        font-family: 'Inter', sans-serif;
+        font-weight: 700 !important;
+        letter-spacing: -0.5px;
+        background: none;
+        -webkit-text-fill-color: initial;
     }
     
     /* --- NEON CARDS & BOXES --- */
     div.stContainer {
-        border-radius: 12px;
+        border-radius: 8px;
+        border: 1px solid #30363d;
+        background-color: #161b22;
     }
 
     /* Stat Box (Map Analyzer) */
     .stat-box { 
-        border-radius: 12px;
-        padding: 20px; 
+        border-radius: 8px;
+        padding: 15px; 
         text-align: center; 
-        background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%);
-        border: 1px solid rgba(255,255,255,0.1); 
-        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-        backdrop-filter: blur(5px);
-        transition: all 0.3s ease;
+        background-color: #21262d;
+        border: 1px solid #30363d;
     }
     .stat-box:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 0 20px rgba(0, 191, 255, 0.2);
+        border-color: #58a6ff;
     }
-    .stat-val { font-size: 2.5em; font-weight: 800; color: white;
-        text-shadow: 0 0 10px rgba(255,255,255,0.3); }
-    .stat-lbl { font-size: 0.8em; text-transform: uppercase; letter-spacing: 2px; color: rgba(255,255,255,0.6);
+    .stat-val { font-size: 2em; font-weight: 700; color: #f0f2f6; }
+    .stat-lbl { font-size: 0.75em; text-transform: uppercase; letter-spacing: 1px; color: #8b949e;
         margin-top: 5px; }
     
     /* Playbook Cards */
     .pb-card {
-        background: linear-gradient(90deg, #0f0f16 0%, #161625 100%);
-        border: 1px solid #333;
-        border-left: 4px solid #00BFFF;
-        border-radius: 10px;
+        background-color: #21262d;
+        border: 1px solid #30363d;
+        border-left: 4px solid #58a6ff;
+        border-radius: 6px;
         padding: 15px;
         margin-bottom: 10px;
         transition: all 0.3s;
     }
     .pb-card:hover {
-        border-color: #FF1493;
-        box-shadow: 0 0 15px rgba(255, 20, 147, 0.2);
+        border-color: #58a6ff;
         transform: translateX(5px);
     }
 
@@ -322,59 +316,62 @@ st.markdown("""
     
     /* --- RECENT MATCHES --- */
     .rec-card { 
-        background: linear-gradient(to right, rgba(255,255,255,0.03), transparent);
-        border-left: 4px solid #555; 
+        background-color: #21262d;
+        border-left: 4px solid #30363d; 
         padding: 12px; margin-bottom: 10px; border-radius: 6px; 
-        border-top: 1px solid rgba(255,255,255,0.05);
+        border: 1px solid #30363d;
     }
 
     /* --- PROTOCOLS (IF/THEN) --- */
     .proto-box { 
-        background: rgba(20,20,30,0.6);
-        border-left: 3px solid #00BFFF; 
+        background-color: #161b22;
+        border-left: 3px solid #58a6ff; 
         padding: 12px; margin-bottom: 8px; border-radius: 0 8px 8px 0; 
-        border: 1px solid rgba(0,191,255,0.1);
+        border: 1px solid #30363d;
     }
-    .proto-if { color: #FFD700; font-size: 0.85em; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;
+    .proto-if { color: #e3b341; font-size: 0.85em; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;
     }
     .proto-then { color: #fff; font-size: 1em; margin-top: 4px; padding-left: 10px; border-left: 1px solid #444;
     }
 
     /* Inputs */
     div[data-testid="stTextInput"] input, div[data-testid="stTextArea"] textarea {
-        background-color: #1a1a25;
-        color: white;
-        border: 1px solid #444;
+        background-color: #0d1117;
+        color: #c9d1d9;
+        border: 1px solid #30363d;
+        border-radius: 6px;
     }
     div[data-testid="stSelectbox"] > div > div {
-        background-color: #1a1a25;
-        color: white;
+        background-color: #0d1117;
+        color: #c9d1d9;
+        border-radius: 6px;
     }
     
     /* Button Primary override for canvas save */
     button[kind="primary"] {
-        background: linear-gradient(90deg, #00BFFF, #FF1493) !important;
+        background-color: #238636 !important;
         border: none !important;
         color: white !important;
         font-weight: bold !important;
+        border-radius: 6px !important;
     }
 
     /* --- VALORANT STYLE MATCH CARD (REVISED LAYOUT) --- */
     .val-card {
-        background-color: #121212;
-        border-radius: 4px;
+        background-color: #161b22;
+        border-radius: 6px;
         margin-bottom: 8px;
         display: flex; /* Flexbox aktiviert: Elemente liegen nebeneinander */
         align-items: center;
         height: 90px;
         overflow: hidden;
-        border: 1px solid #222;
+        border: 1px solid #30363d;
         position: relative;
         transition: transform 0.2s, background-color 0.2s;
     }
     .val-card:hover {
         transform: translateX(4px);
-        background-color: #1a1a1a;
+        background-color: #21262d;
     }
     .val-bar {
         width: 6px;
@@ -511,8 +508,8 @@ st.markdown("""
 
     /* --- POWER RANKING CARD DESIGN (FIXED & COMPACT) --- */
     .rank-row {
-        background-color: #121212;
-        border: 1px solid #222;
+        background-color: #161b22;
+        border: 1px solid #30363d;
         border-radius: 4px;
         margin-bottom: 6px;
         display: flex;
@@ -525,9 +522,9 @@ st.markdown("""
         overflow: hidden;
     }
     .rank-row:hover {
-        background-color: #1a1a1a;
+        background-color: #21262d;
         transform: translateX(4px);
-        border-color: #333;
+        border-color: #58a6ff;
     }
     
     /* Map Bild */
@@ -620,8 +617,8 @@ st.markdown("""
     .cal-day-box {
         min-height: 120px;
         /* Bigger height for calendar boxes */
-        background-color: #121212;
-        border: 1px solid #333;
+        background-color: #161b22;
+        border: 1px solid #30363d;
         border-radius: 6px;
         padding: 8px;
         margin: 2px;
@@ -629,8 +626,8 @@ st.markdown("""
         overflow: hidden;
     }
     .cal-day-box:hover {
-        border-color: #00BFFF;
-        background-color: #1a1a1a;
+        border-color: #58a6ff;
+        background-color: #21262d;
     }
     .cal-date {
         font-weight: 900;
@@ -639,10 +636,10 @@ st.markdown("""
         font-size: 1.1em;
     }
     .cal-today {
-        border: 1px solid #00BFFF !important;
-        background-color: #0f1820 !important;
+        border: 1px solid #58a6ff !important;
+        background-color: #1f2428 !important;
     }
-    .cal-today .cal-date { color: #00BFFF;
+    .cal-today .cal-date { color: #58a6ff;
     }
     
     .cal-event-pill {
@@ -1115,16 +1112,31 @@ def parse_tracker_json(file_input):
             for m in matches:
                 meta = m.get('metadata', {})
                 segments = m.get('segments', [])
+                
+                # 1. Versuch: Match-Export (player-summary)
                 p_segs = [s for s in segments if s.get('type') == 'player-summary']
+                is_profile_export = False
+                
+                # 2. Versuch: Profil-Export (agent) - falls keine Match-Daten gefunden wurden
+                if not p_segs:
+                    p_segs = [s for s in segments if s.get('type') == 'agent']
+                    is_profile_export = True
                 
                 for p_seg in p_segs:
                     stats = p_seg.get('stats', {})
                     attrs = p_seg.get('attributes', {})
+                    p_meta = p_seg.get('metadata', {})
+                    
                     kills = stats.get('kills', {}).get('value', 0)
                     deaths = stats.get('deaths', {}).get('value', 1)
                     assists = stats.get('assists', {}).get('value', 0)
                     hs = stats.get('headshots', {}).get('value', 0)
-                    total_hits = hs + stats.get('bodyshots', {}).get('value', 0) + stats.get('legshots', {}).get('value', 0)
+                    
+                    # Robustere Treffer-Erkennung (Match vs Profile Export Keys)
+                    bs = stats.get('bodyshots', {}).get('value', 0) or stats.get('dealtBodyshots', {}).get('value', 0)
+                    ls = stats.get('legshots', {}).get('value', 0) or stats.get('dealtLegshots', {}).get('value', 0)
+                    total_hits = hs + bs + ls
+                    
                     hs_percent = (hs / total_hits * 100) if total_hits > 0 else 0
                     c_grenade = stats.get('grenadeCasts', {}).get('value', 0)
                     c_abil1 = stats.get('ability1Casts', {}).get('value', 0)
@@ -1135,17 +1147,38 @@ def parse_tracker_json(file_input):
                     clutches = sum([stats.get(f'clutches1v{i}', {}).get('value', 0) for i in range(1, 6)])
                     kast = stats.get('kast', {}).get('value', 0)
                     rounds = stats.get('roundsPlayed', {}).get('value', 1)
+                    
                     if kast == 0 and rounds > 0: kast = ((kills + assists + (rounds - deaths)) / rounds) * 100
-                    res = "Unknown"
-                    if 'result' in meta: res = meta['result']
-                    elif 'hasWon' in stats: res = "Victory" if stats['hasWon']['value'] else "Defeat"
+                    
+                    # Unterscheidung je nach Export-Typ
+                    if is_profile_export:
+                        # Daten aus Profil-Export (luggi_data.json)
+                        # Spielername steht im Root-Objekt unter platformInfo
+                        player_name = m.get('platformInfo', {}).get('platformUserIdentifier', 'Unknown').split('#')[0]
+                        agent_name = p_meta.get('name', 'Unknown') # Hier heißt es 'name', nicht 'agentName'
+                        map_name = "All Maps" # Profil-Export ist aggregiert
+                        matches_played = stats.get('matchesPlayed', {}).get('value', 1)
+                        wins = stats.get('matchesWon', {}).get('value', 0)
+                        res = "Aggregate"
+                        match_id = attrs.get('key', 'Unknown') # Eindeutige ID für den Agenten-Eintrag
+                    else:
+                        # Daten aus Match-Export
+                        player_name = attrs.get('platformUserIdentifier', 'Unknown').split('#')[0]
+                        agent_name = p_meta.get('agentName', 'Unknown')
+                        map_name = meta.get('mapName', 'Unknown')
+                        matches_played = 1
+                        res = "Unknown"
+                        if 'result' in meta: res = meta['result']
+                        elif 'hasWon' in stats: res = "Victory" if stats['hasWon']['value'] else "Defeat"
+                        wins = 1 if res == "Victory" else 0
+                        match_id = m.get('attributes', {}).get('id', 'Unknown')
                     
                     parsed_data.append({
-                        'MatchID': m.get('attributes', {}).get('id', 'Unknown'),
+                        'MatchID': match_id,
                         'Date': meta.get('modeName', 'Ranked'),
-                        'Map': meta.get('mapName', 'Unknown'),
-                        'Player': attrs.get('platformUserIdentifier', 'Unknown').split('#')[0],
-                        'Agent': p_seg.get('metadata', {}).get('agentName', 'Unknown'),
+                        'Map': map_name,
+                        'Player': player_name,
+                        'Agent': agent_name,
                         'Result': res,
                         'Kills': kills, 'Deaths': deaths, 'Assists': assists,
                         'KD': kills/deaths if deaths>0 else kills,
@@ -1156,7 +1189,7 @@ def parse_tracker_json(file_input):
                         'Cast_Abil2': c_abil2, 'Cast_Ult': c_ult,
                         'Total_Util': c_grenade + c_abil1 + c_abil2 + c_ult,
                         'FK': fk, 'FD': fd, 'Clutches': clutches, 'KAST': kast,
-                        'MatchesPlayed': 1, 'Wins': 1 if res == "Victory" else 0
+                        'MatchesPlayed': matches_played, 'Wins': wins
                     })
         return pd.DataFrame(parsed_data)
     except Exception as e: print(f"Parser Error: {e}"); return pd.DataFrame()
@@ -3634,6 +3667,11 @@ elif page == "📊 PLAYERS":
             "Sentinel": ["Sage", "Cypher", "Killjoy", "Chamber", "Deadlock", "Vyse"]
         }
 
+        def get_role(agent_name):
+            for role, agents in AGENT_ROLES.items():
+                if agent_name in agents: return role
+            return "Flex"
+
         st.markdown("### 🧬 INDIVIDUAL PLAYER DEEP DIVE (Ranked Data)")
         deep_player = st.selectbox("Select Player", ["Andrei", "Benni", "Luca", "Luggi", "Remus", "Sofi"])
         
@@ -3684,7 +3722,7 @@ elif page == "📊 PLAYERS":
             # Daten aggregieren
             ag_stats = df_deep.groupby('Agent').agg({
                 'MatchesPlayed': 'sum',
-                'Kills': 'sum', 'Deaths': 'sum',
+                'Kills': 'sum', 'Deaths': 'sum', 'Assists': 'sum',
                 'Wins': 'sum',
                 'Rounds': 'sum',
                 'HS%': 'mean',
@@ -3701,12 +3739,29 @@ elif page == "📊 PLAYERS":
             ag_stats['E_per_round'] = ag_stats['Cast_Abil2'] / safe_rounds
             ag_stats['X_per_round'] = ag_stats['Cast_Ult'] / safe_rounds
             
-            # VLR Rating Calculation per Agent
-            # Formula: KPR + (APR/3) + (ADR/300) + (FK-FD)/Rounds + 0.2 (Offset)
-            ag_stats['KPR'] = ag_stats['Kills'] / safe_rounds
-            ag_stats['APR'] = (ag_stats['Kills'] * 0.3) / safe_rounds # Approximation if Assists not in agg, but we need Assists
-            # Fix: Assists were missing in agg above, let's add them if possible or use Kills proxy. 
-            # Better: Add 'Assists' to agg.
+            # --- ROLE-BASED RATING CALCULATION ---
+            def calculate_weighted_rating(row):
+                role = get_role(row['Agent'])
+                kpr = row['Kills'] / row['Rounds'] if row['Rounds'] > 0 else 0
+                apr = row['Assists'] / row['Rounds'] if row['Rounds'] > 0 else 0
+                adr = row['ADR']
+                surv = (row['Rounds'] - row['Deaths']) / row['Rounds'] if row['Rounds'] > 0 else 0
+                fk_fd_diff = (row['FK'] - row['FD']) / row['Rounds'] if row['Rounds'] > 0 else 0
+                
+                if role == 'Duelist':
+                    # Entry focus: Kills, FK/FD diff, ADR
+                    return (kpr * 1.0) + (adr / 150) + (fk_fd_diff * 1.5) + 0.1
+                elif role == 'Initiator':
+                    # Support focus: Assists, ADR, KPR
+                    return (kpr * 0.8) + (apr * 1.2) + (adr / 160) + 0.1
+                elif role == 'Controller':
+                    # Survival, Assists, Impact
+                    return (kpr * 0.7) + (apr * 1.0) + (surv * 0.8) + (adr / 180)
+                elif role == 'Sentinel':
+                    # Anchor focus: Survival, KPR (holding site)
+                    return (kpr * 0.9) + (surv * 1.0) + (adr / 170)
+                else:
+                    return (kpr * 1.0) + (adr / 160) + (fk_fd_diff)
 
             # Sortieren nach meisten Matches
             ag_stats = ag_stats.sort_values('MatchesPlayed', ascending=False)
@@ -3721,8 +3776,7 @@ elif page == "📊 PLAYERS":
                 table_data.append({
                     "Icon": img_b64, "Agent": agent_name,
                     "Matches": int(row['MatchesPlayed']),
-                    # NEW FORMULA: KPR + (ADR/450) + (FK-FD)/Rounds
-                    "Rating": (row['Kills']/row['Rounds'] if row['Rounds']>0 else 0) + (row['ADR']/450) + ((row['FK']-row['FD'])/row['Rounds'] if row['Rounds']>0 else 0),
+                    "Rating": calculate_weighted_rating(row),
                     "Win%": row['Win%'],
                     "K/D": row['KD'], "HS%": row['HS%'],
                     "C": row['C_per_round'], "Q": row['Q_per_round'],
@@ -3825,11 +3879,6 @@ elif page == "📊 PLAYERS":
             st.subheader("🕸️ ROLE PERFORMANCE ANALYZER")
             
             # Assign Roles to df_deep
-            def get_role(agent_name):
-                for role, agents in AGENT_ROLES.items():
-                    if agent_name in agents: return role
-                return "Flex"
-            
             df_deep['Role'] = df_deep['Agent'].apply(get_role)
             
             # Group by Role
