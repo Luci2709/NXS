@@ -157,7 +157,7 @@ def get_allowed_pages(role):
     elif role == "player":
         return ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "📹 VOD REVIEW"]
     elif role == "coach":
-        return ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "📝 MATCH ENTRY", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "📹 VOD REVIEW", "💾 DATABASE"]
+        return ["🏠 HOME", "📝 LOGGING", "📊 VCT Analysis", "🔍 REVIEWS", "📚 LIBRARY", "💾 DATABASE", "⚙️ SETTINGS"]
     elif role == "testing":
         return ["🏠 DASHBOARD", "👥 COACHING", "⚽ SCRIMS", "📝 MATCH ENTRY", "🗺️ MAP ANALYZER", "📘 STRATEGY BOARD", "📚 RESOURCES", "📅 CALENDAR", "📊 PLAYERS", "📹 VOD REVIEW", "💾 DATABASE"]
     return []
@@ -1068,7 +1068,7 @@ def load_data(dummy=None):
     if not df_todos.empty and 'Completed' in df_todos.columns:
         df_todos['Completed'] = df_todos['Completed'].astype(str).str.lower() == 'true'
 
-    df_team_pb = get_df_state("df_team_pb", ['ID', 'Map', 'Name', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
+    df_team_pb = get_df_state("df_team_pb", ['ID', 'Map', 'Name', 'Order', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
     df_legacy_pb = get_df_state("df_legacy_pb", ['Map', 'Name', 'Link', 'Agent_1', 'Agent_2', 'Agent_3', 'Agent_4', 'Agent_5'])
     df_pb_strats = get_df_state("df_pb_strats", ['PB_ID', 'Strat_ID', 'Name', 'Image', 'Protocols', 'Notes', 'Tag', 'Order'])
     if 'Notes' not in df_pb_strats.columns: df_pb_strats['Notes'] = ""
@@ -1701,6 +1701,197 @@ if page == "🏠 DASHBOARD":
             st.info("No matches found for the selected date range.")
 
 # ==============================================================================
+# 📊 VCT ANALYSIS
+# ==============================================================================
+elif page == "📊 VCT Analysis":
+    st.title("VCT & Match Analysis Dashboard")
+
+    # 1. Daten aus Supabase laden
+    # Ersetze "matches_db" mit dem exakten Namen deiner Tabelle in Supabase
+    df_matches = db_fetch("vct") 
+
+    if df_matches.empty:
+        st.warning("Keine Match-Daten in der Datenbank gefunden.")
+    else:
+        # --- DATEN VORBEREITUNG (Pre-Processing) ---
+        # Sicherstellen, dass Zahlen auch Zahlen sind
+        cols_to_numeric = ['Team 1 Score', 'Team 2 Score', 'Team 1 Score At Half', 'Team 2 Score At Half']
+        for col in cols_to_numeric:
+            if col in df_matches.columns:
+                df_matches[col] = pd.to_numeric(df_matches[col], errors='coerce').fillna(0)
+
+        # Datum konvertieren
+        if 'Date' in df_matches.columns:
+            df_matches['Date'] = pd.to_datetime(df_matches['Date'], errors='coerce')
+
+        # Gewinner ermitteln (für Winrates)
+        def get_winner(row):
+            if row['Team 1 Score'] > row['Team 2 Score']:
+                return row['Team 1 Name']
+            elif row['Team 2 Score'] > row['Team 1 Score']:
+                return row['Team 2 Name']
+            return "Draw"
+        
+        df_matches['Winner'] = df_matches.apply(get_winner, axis=1)
+
+        # --- SIDEBAR FILTER ---
+        st.sidebar.header("Filter")
+        
+        # Datumsfilter
+        min_date = df_matches['Date'].min()
+        max_date = df_matches['Date'].max()
+        if pd.notnull(min_date) and pd.notnull(max_date):
+            date_range = st.sidebar.date_input("Zeitraum", [min_date, max_date])
+        
+        # Map Filter
+        maps = sorted(df_matches['Map Name'].unique().astype(str))
+        selected_maps = st.sidebar.multiselect("Maps auswählen", maps, default=maps)
+
+        # Team Filter (Optional, falls du nur bestimmte Teams sehen willst)
+        all_teams = pd.concat([df_matches['Team 1 Name'], df_matches['Team 2 Name']]).unique()
+        selected_teams = st.sidebar.multiselect("Teams filtern (optional)", all_teams)
+
+        # --- FILTER ANWENDEN ---
+        df_filtered = df_matches.copy()
+        
+        if 'date_range' in locals() and len(date_range) == 2:
+            df_filtered = df_filtered[
+                (df_filtered['Date'].dt.date >= date_range[0]) & 
+                (df_filtered['Date'].dt.date <= date_range[1])
+            ]
+        
+        if selected_maps:
+            df_filtered = df_filtered[df_filtered['Map Name'].isin(selected_maps)]
+
+        if selected_teams:
+            df_filtered = df_filtered[
+                (df_filtered['Team 1 Name'].isin(selected_teams)) | 
+                (df_filtered['Team 2 Name'].isin(selected_teams))
+            ]
+
+        # --- DASHBOARD UI ---
+        
+        # 1. TOP LEVEL KPIS
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Matches Gespielt", len(df_filtered))
+        col2.metric("Maps im Pool", df_filtered['Map Name'].nunique())
+        col3.metric("Teams Analysiert", pd.concat([df_filtered['Team 1 Name'], df_filtered['Team 2 Name']]).nunique())
+        avg_rounds = (df_filtered['Team 1 Score'] + df_filtered['Team 2 Score']).mean()
+        col4.metric("Ø Runden pro Match", f"{avg_rounds:.1f}")
+
+        st.divider()
+
+        # TABS für verschiedene Ansichten
+        tab1, tab2, tab3 = st.tabs(["🗺️ Map Statistik", "🕵️ Agent Meta", "📜 Match Historie"])
+
+        with tab1:
+            st.subheader("Map Performance")
+            
+            # Gruppieren nach Map
+            map_stats = df_filtered.groupby('Map Name').agg(
+                Matches=('Match Id', 'count'),
+                Avg_Score_T1=('Team 1 Score', 'mean'),
+                Avg_Score_T2=('Team 2 Score', 'mean')
+            ).reset_index()
+            
+            # Attack / Defense Winrates berechnen (falls Runden-Daten da sind)
+            # Hinweis: Das ist komplexer, da wir Runden-Daten brauchen. 
+            # Hier eine vereinfachte Map-Win-Loss-Verteilung basierend auf existierenden Spalten.
+            
+            # Diagramm anzeigen
+            fig_maps = px.bar(map_stats, x='Map Name', y='Matches', title="Gespielte Maps Verteilung", text_auto=True)
+            st.plotly_chart(fig_maps, use_container_width=True)
+            
+            st.dataframe(map_stats, use_container_width=True)
+
+        with tab2:
+            st.subheader("Agent Pick Rates & Win Rates")
+            
+            # Wir müssen die Agenten aus den Spalten extrahieren.
+            # Annahme: Spalten heißen 'Team 1 Agents' und 'Team 2 Agents' und enthalten Strings wie "Jett, Sova, ..."
+            
+            agent_data = []
+
+            for index, row in df_filtered.iterrows():
+                # Funktion zum Säubern der Agenten-Strings (entfernt Klammern etc.)
+                def clean_agents(agent_str):
+                    if not isinstance(agent_str, str): return []
+                    # Entfernt [, ], " und ' und splittet am Komma
+                    clean = agent_str.replace('[','').replace(']','').replace('"','').replace("'",'')
+                    return [a.strip() for a in clean.split(',')]
+
+                t1_agents = clean_agents(row.get('Team 1 Agents', ''))
+                t2_agents = clean_agents(row.get('Team 2 Agents', ''))
+                
+                winner = row['Winner']
+                t1_name = row['Team 1 Name']
+                t2_name = row['Team 2 Name']
+
+                # T1 Agenten loggen
+                for ag in t1_agents:
+                    if ag: # Leere Strings ignorieren
+                        agent_data.append({
+                            'Agent': ag, 
+                            'Map': row['Map Name'], 
+                            'Result': 'Win' if winner == t1_name else ('Loss' if winner == t2_name else 'Draw')
+                        })
+                
+                # T2 Agenten loggen
+                for ag in t2_agents:
+                    if ag:
+                        agent_data.append({
+                            'Agent': ag, 
+                            'Map': row['Map Name'], 
+                            'Result': 'Win' if winner == t2_name else ('Loss' if winner == t1_name else 'Draw')
+                        })
+
+            if agent_data:
+                df_agents = pd.DataFrame(agent_data)
+                
+                # Pivot Tabelle erstellen
+                agent_stats = df_agents.groupby('Agent').agg(
+                    Picks=('Result', 'count'),
+                    Wins=('Result', lambda x: (x == 'Win').sum())
+                ).reset_index()
+                
+                agent_stats['Win Rate %'] = ((agent_stats['Wins'] / agent_stats['Picks']) * 100).round(1)
+                agent_stats['Pick Rate %'] = ((agent_stats['Picks'] / len(df_filtered) / 2) * 100).round(1) # Geteilt durch 2 Teams
+                
+                # Sortieren
+                agent_stats = agent_stats.sort_values(by='Picks', ascending=False)
+
+                # Charts
+                col_a1, col_a2 = st.columns([2, 1])
+                
+                with col_a1:
+                    fig_agents = px.bar(agent_stats.head(15), x='Agent', y='Picks', color='Win Rate %', 
+                                      title="Top Agenten Picks & Win Rate", color_continuous_scale='RdBu')
+                    st.plotly_chart(fig_agents, use_container_width=True)
+                
+                with col_a2:
+                    st.dataframe(
+                        agent_stats[['Agent', 'Picks', 'Win Rate %', 'Pick Rate %']], 
+                        use_container_width=True,
+                        hide_index=True
+                    )
+            else:
+                st.info("Keine Agenten-Daten parsen können. Bitte prüfe das Format der Spalten 'Team 1 Agents' und 'Team 2 Agents'.")
+
+        with tab3:
+            st.subheader("Detaillierte Match Historie")
+            
+            # Tabelle aufhübschen für Display
+            display_cols = ['Date', 'Event Name', 'Map Name', 'Team 1 Name', 'Team 1 Score', 'Team 2 Score', 'Team 2 Name', 'Winner']
+            # Nur Spalten nutzen, die auch wirklich existieren
+            final_cols = [c for c in display_cols if c in df_filtered.columns]
+            
+            st.dataframe(
+                df_filtered[final_cols].sort_values(by='Date', ascending=False),
+                use_container_width=True,
+                hide_index=True
+            )
+
+# ==============================================================================
 # 👥 COACHING
 # ==============================================================================
 elif page == "👥 COACHING":
@@ -2295,7 +2486,7 @@ elif page == "📘 STRATEGY BOARD":
     # Load Data (Variables are already loaded globally: df_team_pb, df_pb_strats, df_theory)
     
     # TABS (INTEGRATION OF WHITEBOARD)
-    tab_playbooks, tab_theory, tab_lineups, tab_links = st.tabs(["🧠 TACTICAL PLAYBOOKS", "📜 MAP THEORY", "🎯 LINEUPS", "🔗 EXTERNAL LINKS"])
+    tab_playbooks, tab_comps, tab_theory, tab_lineups, tab_links = st.tabs(["🧠 TACTICAL PLAYBOOKS", "♟️ COMPOSITIONS", "📜 MAP THEORY", "🎯 LINEUPS", "🔗 EXTERNAL LINKS"])
 
     # --------------------------------------------------------------------------
     # TAB 1: TACTICAL PLAYBOOKS
@@ -2939,6 +3130,229 @@ elif page == "📘 STRATEGY BOARD":
                                         db_update("nexus_pb_strats", {'ID': strat['ID'], 'Protocols': '[]'}, "df_pb_strats")
                                         st.rerun()
                             st.divider()
+
+    # --------------------------------------------------------------------------
+    # TAB 2: COMPOSITIONS
+    # --------------------------------------------------------------------------
+    with tab_comps:
+        st.subheader("⚔️ TEAM COMPOSITIONS")
+        
+        # 1. Map Selector
+        if 'comp_map_sel' not in st.session_state: 
+            st.session_state.comp_map_sel = sorted(df['Map'].unique())[0] if not df.empty else "Ascent"
+            
+        with st.expander("🗺️ SELECT MAP", expanded=True):
+            render_visual_selection(sorted(df['Map'].unique()), 'map', 'comp_sel', multi=False, key_state='comp_map_sel')
+            
+        sel_map = st.session_state.comp_map_sel
+        
+        # 2. Map Header
+        map_img_path = get_map_img(sel_map, 'list')
+        if map_img_path:
+            st.image(map_img_path, use_container_width=True)
+        
+        st.divider()
+
+        # Ensure Order column exists
+        if 'Order' not in df_team_pb.columns:
+            df_team_pb['Order'] = range(len(df_team_pb))
+        
+        # 3. Comps List
+        map_comps = df_team_pb[df_team_pb['Map'] == sel_map].sort_values('Order')
+        
+        # Helper for stats
+        def get_comp_winrate(comp_row, matches_df):
+            # Extract comp agents (sorted, lowercase for comparison)
+            c_agents = sorted([str(comp_row.get(f'Agent_{i}','')).strip().lower() for i in range(1,6) if comp_row.get(f'Agent_{i}')])
+            if not c_agents: return 0, 0, 0, 0 # Empty comp
+            
+            wins = 0
+            losses = 0
+            
+            # Filter matches for this map
+            m_df = matches_df[matches_df['Map'] == comp_row['Map']]
+            
+            for _, m_row in m_df.iterrows():
+                # Extract match agents
+                m_agents = sorted([str(m_row.get(f'MyComp_{i}','')).strip().lower() for i in range(1,6) if m_row.get(f'MyComp_{i}')])
+                
+                # Compare
+                if c_agents == m_agents:
+                    if m_row['Result'] == 'W': wins += 1
+                    elif m_row['Result'] == 'L': losses += 1
+            
+            total = wins + losses
+            wr = (wins / total * 100) if total > 0 else 0
+            return total, wins, losses, wr
+
+        if not map_comps.empty:
+            # --- BEST COMP SUGGESTION ---
+            best_comp = None
+            best_wr = -1
+            best_matches = 0
+            
+            for _, row in map_comps.iterrows():
+                m, w, l, wr = get_comp_winrate(row, df)
+                if m > 0: # Only consider played comps
+                    if wr > best_wr:
+                        best_wr = wr; best_comp = row; best_matches = m
+                    elif wr == best_wr and m > best_matches:
+                        best_comp = row; best_matches = m
+            
+            if best_comp is not None:
+                st.markdown("### 🏆 Recommended Composition")
+                bc_ag_html = ""
+                for i in range(1, 6):
+                    a = best_comp.get(f'Agent_{i}')
+                    if a and pd.notna(a) and str(a).strip() != "":
+                        b64 = get_styled_agent_img_b64(a)
+                        if b64: bc_ag_html += f"<img src='data:image/png;base64,{b64}' style='width:45px; height:45px; border-radius:50%; border:2px solid #FFD700; margin-right:5px;'>"
+                
+                st.markdown(f"""
+                <div style="background: linear-gradient(90deg, rgba(255, 215, 0, 0.1) 0%, rgba(0,0,0,0) 100%); border-left: 4px solid #FFD700; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between;">
+                        <div>
+                            <div style="font-weight:bold; font-size:1.2em; color:#FFD700;">{best_comp['Name']}</div>
+                            <div style="font-size:0.9em; color:#aaa;">Highest Winrate on {sel_map}</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-weight:bold; font-size:1.5em; color:#FFD700;">{best_wr:.0f}% WR</div>
+                            <div style="font-size:0.8em; color:#888;">{best_matches} Matches</div>
+                        </div>
+                    </div>
+                    <div style="margin-top:10px;">{bc_ag_html}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.divider()
+
+            st.markdown(f"### Active Comps for {sel_map}")
+            
+            for idx, row in map_comps.iterrows():
+                with st.container():
+                    # Layout: Sort Buttons | Content
+                    c_sort, c_content = st.columns([0.5, 10])
+                    
+                    with c_sort:
+                        # Up/Down Logic for Prioritization
+                        if st.button("⬆️", key=f"cup_{row['ID']}"):
+                            curr_ord = row['Order']
+                            prev = map_comps[map_comps['Order'] < curr_ord].sort_values('Order', ascending=False).head(1)
+                            if not prev.empty:
+                                prev_row = prev.iloc[0]
+                                db_update("nexus_playbooks", {'ID': row['ID'], 'Order': int(prev_row['Order'])}, "df_team_pb")
+                                db_update("nexus_playbooks", {'ID': prev_row['ID'], 'Order': int(curr_ord)}, "df_team_pb")
+                                st.rerun()
+                        
+                        if st.button("⬇️", key=f"cdn_{row['ID']}"):
+                            curr_ord = row['Order']
+                            nxt = map_comps[map_comps['Order'] > curr_ord].sort_values('Order', ascending=True).head(1)
+                            if not nxt.empty:
+                                nxt_row = nxt.iloc[0]
+                                db_update("nexus_playbooks", {'ID': row['ID'], 'Order': int(nxt_row['Order'])}, "df_team_pb")
+                                db_update("nexus_playbooks", {'ID': nxt_row['ID'], 'Order': int(curr_ord)}, "df_team_pb")
+                                st.rerun()
+
+                    with c_content:
+                        # Calculate Stats
+                        matches_count, wins, losses, wr = get_comp_winrate(row, df)
+                        
+                        # Color for Winrate
+                        wr_color = "#00ff80" if wr >= 50 else "#ff4655"
+                        if matches_count == 0: wr_color = "#666"
+
+                        ag_html = ""
+                        for i in range(1, 6):
+                            a = row.get(f'Agent_{i}')
+                            if a and pd.notna(a) and str(a).strip() != "":
+                                b64 = get_styled_agent_img_b64(a)
+                                if b64:
+                                    ag_html += f"<div style='display:flex; flex-direction:column; align-items:center; margin-right:15px;'><img src='data:image/png;base64,{b64}' style='width:60px; height:60px; border-radius:50%; border:2px solid #222; box-shadow: 0 0 5px rgba(0,0,0,0.5);'><span style='font-size:0.7em; color:#aaa; margin-top:4px;'>{a}</span></div>"
+                        
+                        st.markdown(f"""
+                        <div style="background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
+                            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                                <div>
+                                    <div style="font-size:1.2em; font-weight:bold; color:#00BFFF;">{row['Name']}</div>
+                                    <span style="font-size:0.8em; color:#666;">ID: {row['ID'][:8]}</span>
+                                </div>
+                                <div style="text-align:right;">
+                                    <div style="font-size:1.5em; font-weight:bold; color:{wr_color};">{wr:.0f}% WR</div>
+                                    <div style="font-size:0.8em; color:#aaa;">{matches_count} Matches ({wins}W - {losses}L)</div>
+                                </div>
+                            </div>
+                            <div style="display:flex; flex-wrap:wrap;">{ag_html}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # --- MATCHUP DETAILS ---
+                        with st.expander("🔍 Matchup Details (vs Enemy Comps)"):
+                            # Filter matches for this specific comp
+                            c_agents = sorted([str(row.get(f'Agent_{i}','')).strip().lower() for i in range(1,6) if row.get(f'Agent_{i}')])
+                            relevant_matches = []
+                            
+                            # We iterate df again (could be optimized but fine for now)
+                            for _, m_row in df[df['Map'] == sel_map].iterrows():
+                                m_agents = sorted([str(m_row.get(f'MyComp_{i}','')).strip().lower() for i in range(1,6) if m_row.get(f'MyComp_{i}')])
+                                if c_agents == m_agents:
+                                    relevant_matches.append(m_row)
+                            
+                            if relevant_matches:
+                                rel_df = pd.DataFrame(relevant_matches)
+                                # Helper to make enemy comp hashable
+                                def get_en_comp_tuple(r):
+                                    return tuple(sorted([str(r.get(f'EnComp_{i}','')).strip() for i in range(1,6) if r.get(f'EnComp_{i}') and str(r.get(f'EnComp_{i}')).strip() != ""]))
+                                
+                                rel_df['EnCompTuple'] = rel_df.apply(get_en_comp_tuple, axis=1)
+                                
+                                matchups = rel_df.groupby('EnCompTuple').agg(
+                                    Matches=('MatchID', 'count'),
+                                    Wins=('Result', lambda x: (x=='W').sum()),
+                                    Losses=('Result', lambda x: (x=='L').sum())
+                                ).reset_index().sort_values('Matches', ascending=False)
+                                
+                                for _, mu in matchups.iterrows():
+                                    en_agents = mu['EnCompTuple']
+                                    if not en_agents: continue
+                                    
+                                    # Render Enemy Icons
+                                    en_html = ""
+                                    for ea in en_agents:
+                                        eb64 = get_styled_agent_img_b64(ea)
+                                        if eb64: en_html += f"<img src='data:image/png;base64,{eb64}' style='width:30px; height:30px; border-radius:50%; border:1px solid #555; margin-right:2px;' title='{ea}'>"
+                                    
+                                    st.markdown(f"<div style='display:flex; align-items:center; justify-content:space-between; background:#0d1117; padding:8px; border-radius:4px; margin-bottom:4px;'><div>{en_html}</div><div style='font-size:0.9em;'><b>{mu['Wins']}W</b> - <b>{mu['Losses']}L</b> <span style='color:#666; font-size:0.8em;'>({mu['Matches']} matches)</span></div></div>", unsafe_allow_html=True)
+                            else:
+                                st.caption("No matches played with this composition yet.")
+
+                        if st.button(f"🗑️ Delete {row['Name']}", key=f"del_comp_{row['ID']}"):
+                             db_delete("nexus_playbooks", row['ID'], "df_team_pb")
+                             st.rerun()
+        else:
+            st.info(f"No compositions defined for {sel_map}.")
+
+        st.divider()
+        
+        # 4. Add New Comp
+        with st.expander("➕ Add New Composition Idea", expanded=False):
+            with st.form("add_comp_form"):
+                c_name = st.text_input("Composition Name", placeholder="e.g. Double Controller Meta")
+                st.caption("Select Agents")
+                cols = st.columns(5)
+                all_agents = sorted([os.path.basename(x).replace(".png","").capitalize() for x in glob.glob(os.path.join(ASSET_DIR, "agents", "*.png"))])
+                sel_agents = [cols[i].selectbox(f"Agent {i+1}", [""] + all_agents, key=f"nc_ag_{i}") for i in range(5)]
+                
+                if st.form_submit_button("💾 Save Composition"):
+                    if c_name:
+                        new_id = str(uuid.uuid4())
+                        # Get max order
+                        max_order = df_team_pb[df_team_pb['Map'] == sel_map]['Order'].max()
+                        new_order = max_order + 1 if pd.notna(max_order) else 0
+                        
+                        new_row = {'ID': new_id, 'Map': sel_map, 'Name': c_name, 'Order': new_order}
+                        for i in range(5): new_row[f'Agent_{i+1}'] = sel_agents[i]
+                        db_insert("nexus_playbooks", new_row, "df_team_pb")
+                        st.success("Composition saved!"); st.rerun()
+                    else: st.error("Please provide a name.")
 
     # --------------------------------------------------------------------------
     # TAB 3: MAP THEORY
@@ -3741,27 +4155,14 @@ elif page == "📊 PLAYERS":
             
             # --- ROLE-BASED RATING CALCULATION ---
             def calculate_weighted_rating(row):
-                role = get_role(row['Agent'])
-                kpr = row['Kills'] / row['Rounds'] if row['Rounds'] > 0 else 0
-                apr = row['Assists'] / row['Rounds'] if row['Rounds'] > 0 else 0
+                # Standard VLR Rating Approximation (Reset)
+                # Formula: KPR + (ADR/450) + (FK-FD)/Rounds
+                rounds = row['Rounds'] if row['Rounds'] > 0 else 1
+                kpr = row['Kills'] / rounds
                 adr = row['ADR']
-                surv = (row['Rounds'] - row['Deaths']) / row['Rounds'] if row['Rounds'] > 0 else 0
-                fk_fd_diff = (row['FK'] - row['FD']) / row['Rounds'] if row['Rounds'] > 0 else 0
+                fk_fd_diff = (row['FK'] - row['FD']) / rounds
                 
-                if role == 'Duelist':
-                    # Entry focus: Kills, FK/FD diff, ADR
-                    return (kpr * 1.0) + (adr / 150) + (fk_fd_diff * 1.5) + 0.1
-                elif role == 'Initiator':
-                    # Support focus: Assists, ADR, KPR
-                    return (kpr * 0.8) + (apr * 1.2) + (adr / 160) + 0.1
-                elif role == 'Controller':
-                    # Survival, Assists, Impact
-                    return (kpr * 0.7) + (apr * 1.0) + (surv * 0.8) + (adr / 180)
-                elif role == 'Sentinel':
-                    # Anchor focus: Survival, KPR (holding site)
-                    return (kpr * 0.9) + (surv * 1.0) + (adr / 170)
-                else:
-                    return (kpr * 1.0) + (adr / 160) + (fk_fd_diff)
+                return kpr + (adr / 450) + fk_fd_diff
 
             # Sortieren nach meisten Matches
             ag_stats = ag_stats.sort_values('MatchesPlayed', ascending=False)
